@@ -21,6 +21,7 @@ Vagrant.configure("2") do |config|
     yum update -y
     yum install -y postgresql10-server postgresql10-contrib
 
+    su -l postgres -c "echo 'export PATH=/usr/pgsql-10/bin:\$PATH' >> /var/lib/pgsql/.pgsql_profile"
     su -l postgres -c "/usr/pgsql-10/bin/initdb -D /var/lib/pgsql/10/data"
     su -l postgres -c "/usr/pgsql-10/bin/pg_ctl -D /var/lib/pgsql/10/data start -w"
   SHELL
