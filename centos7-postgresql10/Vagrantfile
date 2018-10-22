@@ -2,7 +2,7 @@
 # vi: set ft=ruby :
 
 # define hostname
-NAME = "centos7-postgresql10"
+NAME = "pg10"
 
 Vagrant.configure("2") do |config|
   # The most common configuration options are documented and commented below.
@@ -23,7 +23,9 @@ Vagrant.configure("2") do |config|
 
     su -l postgres -c "echo 'export PATH=/usr/pgsql-10/bin:\$PATH' >> /var/lib/pgsql/.pgsql_profile"
     su -l postgres -c "/usr/pgsql-10/bin/initdb -D /var/lib/pgsql/10/data"
-    su -l postgres -c "/usr/pgsql-10/bin/pg_ctl -D /var/lib/pgsql/10/data start -w"
+    sudo systemctl enable postgresql-10
+    sudo systemctl start postgresql-10
+    #su -l postgres -c "/usr/pgsql-10/bin/pg_ctl -D /var/lib/pgsql/10/data start -w"
   SHELL
 
 end

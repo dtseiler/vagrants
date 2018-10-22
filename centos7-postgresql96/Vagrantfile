@@ -2,7 +2,7 @@
 # vi: set ft=ruby :
 
 # define hostname
-NAME = "centos7-postgresql96"
+NAME = "pg96"
 
 Vagrant.configure("2") do |config|
   # The most common configuration options are documented and commented below.
@@ -23,7 +23,9 @@ Vagrant.configure("2") do |config|
 
     su -l postgres -c "echo 'export PATH=/usr/pgsql-9.6/bin:\$PATH' >> /var/lib/pgsql/.pgsql_profile"
     su -l postgres -c "/usr/pgsql-9.6/bin/initdb -D /var/lib/pgsql/9.6/data"
-    su -l postgres -c "/usr/pgsql-9.6/bin/pg_ctl -D /var/lib/pgsql/9.6/data start -w"
+    sudo systemctl enable postgresql-9.6
+    sudo systemctl start postgresql-9.6
+    #su -l postgres -c "/usr/pgsql-9.6/bin/pg_ctl -D /var/lib/pgsql/9.6/data start -w"
   SHELL
 
 end
