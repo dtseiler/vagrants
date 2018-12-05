@@ -1,0 +1,90 @@
+# -*- mode: ruby -*-
+# # vi: set ft=ruby :
+
+# Specify minimum Vagrant version and Vagrant API version
+VAGRANTFILE_API_VERSION = "2"
+
+# Generate SSH keys
+system("
+    if [[ #{ARGV[0]} = 'up' ]]
+    then
+        echo 'Generating SSH keys ...'
+        mkdir -p ./keys
+        rm -f ./keys/id_rsa ./keys/id_rsa.pub
+
+        ssh-keygen -b 2048 -t rsa -f ./keys/id_rsa -q -N \"\"
+        chmod 400 ./keys/id_rsa*
+    fi
+")
+
+servers = [
+    {
+        :name => "pbr-pgsql",
+        :ipaddr => "192.168.99.11",
+        :mem => "1024"
+    },
+    {
+        :name => "pbr-backrest",
+        :ipaddr => "192.168.99.12",
+        :mem => "512"
+    }
+]
+
+# Create servers
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+    ssh_pub_key = File.readlines("./keys/id_rsa.pub").first.strip
+    config.vm.synced_folder ".", "/vagrant", disabled: true
+    config.hostmanager.enabled = true
+
+    #
+    # PostgreSQL / pgBackRest VMs
+    #
+    servers.each do |server|
+        config.vm.define server[:name] do |srv|
+            srv.vm.box = "bento/centos-7"
+            srv.vm.network :private_network, ip: server[:ipaddr]
+            srv.vm.hostname = server[:name]
+
+            if Vagrant.has_plugin?("vagrant-cachier")
+                srv.cache.scope = :machine
+                srv.cache.enable :yum
+            end
+
+            srv.vm.provider :virtualbox do |vb|
+                vb.name = server[:name]
+                vb.memory = server[:mem]
+                vb.gui = false
+            end
+
+            srv.vm.provision "shell", inline: <<-SHELL
+                sudo echo #{ssh_pub_key} >> /home/vagrant/.ssh/authorized_keys
+                sudo grep -v '^127.0.0.1' /etc/hosts > /tmp/hosts
+                sudo echo "127.0.0.1   localhost localhost.localdomain" >> /tmp/hosts
+                sudo mv /tmp/hosts /etc/host
+                sudo chmod 644 /etc/hosts
+
+                # PG10 for now
+                rpm -Uvh https://download.postgresql.org/pub/repos/yum/10/redhat/rhel-7-x86_64/pgdg-centos10-10-2.noarch.rpm
+                if [ $(hostname) = 'pbr-pgsql' ]
+                then
+                    yum install -y postgresql10-server postgresql10-contrib pgbackrest
+                    su -l postgres -c "echo 'export PATH=/usr/pgsql-10/bin:\$PATH' >> /var/lib/pgsql/.pgsql_profile"
+                    su -l postgres -c "/usr/pgsql-10/bin/initdb -D /var/lib/pgsql/10/data"
+                    sudo systemctl enable postgresql-10
+                    sudo systemctl start postgresql-10
+                else
+                    useradd postgres
+                    yum install -y postgresql10-libs pgbackrest
+                    chown postgres:postgres /etc/pgbackrest.conf
+
+                    # Create Stanza
+                    pgbackrest --stanza=pbrtest stanza-create
+                fi
+            SHELL
+        end
+    end
+
+    config.vm.provision "shell", inline: <<-SHELL
+        #su -l postgres -c "/usr/pgsql-10/bin/pg_ctl -D /var/lib/pgsql/10/data start -w"
+    SHELL
+end
