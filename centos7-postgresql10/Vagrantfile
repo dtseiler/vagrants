@@ -6,7 +6,7 @@ NAME = "pg10"
 
 Vagrant.configure("2") do |config|
     config.vm.define NAME
-    config.vm.box = "bento/centos-7"
+    config.vm.box = "dtsbox"
     config.vm.hostname = NAME
 
     if Vagrant.has_plugin?("vagrant-cachier")
@@ -15,15 +15,14 @@ Vagrant.configure("2") do |config|
     end
 
     config.vm.provision "shell", inline: <<-SHELL
-        rpm -Uvh https://download.postgresql.org/pub/repos/yum/10/redhat/rhel-7-x86_64/pgdg-centos10-10-2.noarch.rpm
-        #yum update -y
+        yum install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm
         yum install -y postgresql10-server postgresql10-contrib
 
         su -l postgres -c "echo 'export PATH=/usr/pgsql-10/bin:\$PATH' >> /var/lib/pgsql/.pgsql_profile"
         su -l postgres -c "/usr/pgsql-10/bin/initdb -D /var/lib/pgsql/10/data"
+        
         sudo systemctl enable postgresql-10
         sudo systemctl start postgresql-10
-        #su -l postgres -c "/usr/pgsql-10/bin/pg_ctl -D /var/lib/pgsql/10/data start -w"
     SHELL
 
 end

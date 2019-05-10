@@ -2,11 +2,11 @@
 # vi: set ft=ruby :
 
 # define hostname
-NAME = "pg11"
+NAME = "pg95"
 
 Vagrant.configure("2") do |config|
     config.vm.define NAME
-    config.vm.box = "dtsbox"
+    config.vm.box = "dts/centos7"
     config.vm.hostname = NAME
 
     if Vagrant.has_plugin?("vagrant-cachier")
@@ -16,13 +16,11 @@ Vagrant.configure("2") do |config|
 
     config.vm.provision "shell", inline: <<-SHELL
         yum install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm
-        #yum update -y
-        yum install -y postgresql11-server postgresql11-contrib
+        yum install -y postgresql95-server postgresql95-contrib
 
-        su -l postgres -c "echo 'export PATH=/usr/pgsql-11/bin:\$PATH' >> /var/lib/pgsql/.pgsql_profile"
-        su -l postgres -c "/usr/pgsql-11/bin/initdb -D /var/lib/pgsql/11/data"
-        systemctl enable postgresql-11
-        systemctl start postgresql-11
+        su -l postgres -c "echo 'export PATH=/usr/pgsql-9.5/bin:\$PATH' >> /var/lib/pgsql/.pgsql_profile"
+        su -l postgres -c "/usr/pgsql-9.5/bin/initdb -D /var/lib/pgsql/9.5/data"
+        sudo systemctl enable postgresql-9.5
+        sudo systemctl start postgresql-9.5
     SHELL
-
 end
