@@ -42,9 +42,8 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
               yum install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm
 
               # Enable PGDG12 Repo while still in dev
-              sed -i -e '/\[pgdg12\]/,/^\[/s/enabled=0/enabled=1/' /etc/yum.repos.d/pgdg-redhat-all.repo
-
-              #yum update -y
+              yum install -y yum-utils
+              yum-config-manager --enable pgdg12
               yum install -y postgresql12-server postgresql12-contrib
 
               su -l postgres -c "echo 'export PATH=/usr/pgsql-12/bin:\$PATH' >> /var/lib/pgsql/.pgsql_profile"
