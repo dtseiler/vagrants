@@ -6,13 +6,8 @@ VAGRANTFILE_API_VERSION = "2"
 
 servers = [
     {
-        :name => "pg12-pg1",
-        :ipaddr => "192.168.124.16",
-        :mem => "1024"
-    },
-    {
-        :name => "pg12-pg2",
-        :ipaddr => "192.168.124.26",
+        :name => "pg12",
+        :ipaddr => "192.168.3.101",
         :mem => "1024"
     }
 ]
@@ -24,7 +19,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 
     servers.each do |server|
         config.vm.define server[:name] do |srv|
-            srv.vm.box = "bento/centos-7"
+            srv.vm.box = "hunleyd/centos7"
             srv.vm.network :private_network, ip: server[:ipaddr]
             srv.vm.hostname = server[:name]
 
@@ -35,16 +30,30 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
             end
 
             srv.vm.provision "shell", inline: <<-SHELL
-              #echo "No Proxy"
-              echo "Proxy Server Setup"
-              echo "proxy=http://192.168.7.3:3128" >> /etc/yum.conf
+              systemctl stop firewalld
+              systemctl disable firewalld
               
               yum install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm
 
+              # Enable PGDG12 Repo while still in dev
+              yum install -y yum-utils
+              yum-config-manager --enable pgdg12
+              #yum-config-manager --enable pgdg12-updates-testing
               yum install -y postgresql12-server postgresql12-contrib
 
               su -l postgres -c "echo 'export PATH=/usr/pgsql-12/bin:\$PATH' >> /var/lib/pgsql/.pgsql_profile"
+              su -l postgres -c "echo '*:*:*:replicator:replicator123' >> /var/lib/pgsql/.pgpass"
+              su -l postgres -c "chmod 0600 /var/lib/pgsql/.pgpass"
+
               su -l postgres -c "/usr/pgsql-12/bin/initdb -D /var/lib/pgsql/12/data"
+              echo "listen_addresses = '*'" >> /var/lib/pgsql/12/data/postgresql.conf
+              echo "wal_level = 'replica'" >> /var/lib/pgsql/12/data/postgresql.conf
+              #echo "host         replication            replicator      192.168.3.0/24      md5" >> /var/lib/pgsql/12/data/pg_hba.conf
+
+              systemctl enable postgresql-12
+              systemctl start postgresql-12
+
+              #su -l postgres -c "psql -c \\"create user replicator replication password 'replicator123'\\""
             SHELL
         end
     end
