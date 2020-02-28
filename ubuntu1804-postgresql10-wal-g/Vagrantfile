@@ -1,0 +1,76 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# define hostname
+NAME = "ubuntu1804-pg10-wal-g"
+
+Vagrant.configure("2") do |config|
+    config.vm.define NAME
+    config.vm.box = "bento/ubuntu-18.04"
+    config.vm.hostname = NAME
+
+    config.vm.provision "shell", inline: <<-SHELL
+        
+        #
+        # PostgreSQL 10 Setup
+        #
+        apt-get -y install curl ca-certificates
+        curl -s https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
+        echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+        apt-get -y update
+        apt-get -y install postgresql-10
+
+        #
+        # WAL-G Setup
+        #
+        wget -nv https://github.com/wal-g/wal-g/releases/download/v0.2.9/wal-g.linux-amd64.tar.gz
+        tar -xzf wal-g.linux-amd64.tar.gz
+        mv wal-g /usr/local/bin
+        rm wal-g.linux-amd64.tar.gz
+
+        mkdir -p /etc/wal-g/environment
+        chown -R postgres:postgres /etc/wal-g
+        chmod 0755 /etc/wal-g
+        chmod 0755 /etc/wal-g/environment
+        
+        #
+        # WAL-G Scripts
+        #
+        cat > /etc/wal-g/environment/env.sh <<EOF
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+export PGHOST=/var/run/postgresql
+export PGPORT=5432
+export AWS_ACCOUNT_ID="#{ENV['AWS_ACCOUNT_ID']}"
+export AWS_ACCESS_KEY_ID="#{ENV['AWS_ACCESS_KEY_ID']}"
+export AWS_SECRET_ACCESS_KEY="#{ENV['AWS_SECRET_ACCESS_KEY']}"
+export AWS_DEFAULT_REGION="#{ENV['AWS_DEFAULT_REGION']}"
+export AWS_REGION="#{ENV['AWS_REGION']}"
+export WALG_S3_PREFIX="#{ENV['WALG_S3_PREFIX']}"
+EOF
+        chmod 755 /etc/wal-g/environment/env.sh
+
+        cat > /usr/local/bin/wal-g_backup.sh <<EOF
+#!/bin/bash
+
+source /etc/wal-g/environment/env.sh
+
+wal-g backup-push \\$1
+EOF
+        chmod 755 /usr/local/bin/wal-g_backup.sh
+
+        cat > /usr/local/bin/wal-g_archive.sh <<EOF
+#!/bin/bash
+
+source /etc/wal-g/environment/env.sh
+
+wal-g wal-push \\$1
+EOF
+        chmod 755 /usr/local/bin/wal-g_archive.sh
+
+        # Configure PostgreSQL WAL archiving
+        echo "wal_level = replica" >> /etc/postgresql/10/main/conf.d/wal-g.conf
+        echo "archive_mode = on" >> /etc/postgresql/10/main/conf.d/wal-g.conf
+        echo "archive_command = '/usr/local/bin/wal-g_archive.sh %p'" >> /etc/postgresql/10/main/conf.d/wal-g.conf
+        systemctl restart postgresql@10-main
+    SHELL
+end
