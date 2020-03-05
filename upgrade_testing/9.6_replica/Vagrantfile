@@ -1,0 +1,152 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+servers = [
+    {
+        :name => "pg96-primary",
+        :ipaddr => "192.168.3.101",
+        :mem => "1024"
+    },
+    {
+        :name => "pg96-replica",
+        :ipaddr => "192.168.3.102",
+        :mem => "1024"
+    }
+]
+
+Vagrant.configure("2") do |config|
+    servers.each do |server|
+        config.vm.define server[:name] do |srv|
+
+            srv.vm.box = "bento/ubuntu-18.04"
+            srv.vm.network :private_network, ip: server[:ipaddr]
+            srv.vm.hostname = server[:name]
+
+            srv.vm.provider :virtualbox do |vb|
+                vb.name = server[:name]
+                vb.memory = server[:mem]
+                vb.gui = false
+            end
+
+            srv.vm.provision "shell", inline: <<-SHELL
+                
+                #
+                # PostgreSQL 9.6 Setup
+                #
+                apt-get -y install curl ca-certificates
+                curl -s https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
+                echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+                apt-get -y update
+                apt-get -y install postgresql-9.6
+
+                #
+                # WAL-G Setup
+                #
+                wget -nv https://github.com/wal-g/wal-g/releases/download/v0.2.9/wal-g.linux-amd64.tar.gz
+                tar -xzf wal-g.linux-amd64.tar.gz
+                mv wal-g /usr/local/bin
+                rm wal-g.linux-amd64.tar.gz
+
+                mkdir -p /etc/wal-g/environment
+                chown -R postgres:postgres /etc/wal-g
+                chmod 0755 /etc/wal-g
+                chmod 0755 /etc/wal-g/environment
+                
+                #
+                # WAL-G Scripts
+                #
+                cat > /etc/wal-g/environment/env.sh <<EOF
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+export PGHOST=/var/run/postgresql
+export PGPORT=5432
+export AWS_ACCOUNT_ID="#{ENV['AWS_ACCOUNT_ID']}"
+export AWS_ACCESS_KEY_ID="#{ENV['AWS_ACCESS_KEY_ID']}"
+export AWS_SECRET_ACCESS_KEY="#{ENV['AWS_SECRET_ACCESS_KEY']}"
+export AWS_DEFAULT_REGION="#{ENV['AWS_DEFAULT_REGION']}"
+export AWS_REGION="#{ENV['AWS_REGION']}"
+export WALG_S3_PREFIX="#{ENV['WALG_S3_PREFIX']}/pg96_replica_upgrade"
+EOF
+                chmod 755 /etc/wal-g/environment/env.sh
+
+                cat > /usr/local/bin/wal-g_backup.sh <<EOF
+#!/bin/bash
+
+source /etc/wal-g/environment/env.sh
+
+wal-g backup-push \\$1
+EOF
+                chmod 755 /usr/local/bin/wal-g_backup.sh
+
+                cat > /usr/local/bin/wal-g_restore.sh <<EOF
+#!/bin/bash
+
+source /etc/wal-g/environment/env.sh
+
+rm -rf \\$1
+wal-g backup-fetch \\$1 LATEST
+EOF
+                chmod 755 /usr/local/bin/wal-g_restore.sh
+
+                cat > /usr/local/bin/wal-g_archive.sh <<EOF
+#!/bin/bash
+
+source /etc/wal-g/environment/env.sh
+
+wal-g wal-push \\$1
+EOF
+                chmod 755 /usr/local/bin/wal-g_archive.sh
+
+                cat > /usr/local/bin/wal-g_fetch.sh <<EOF
+#!/bin/bash
+
+source /etc/wal-g/environment/env.sh
+
+wal-g wal-fetch \\$1 \\$2
+EOF
+                chmod 755 /usr/local/bin/wal-g_fetch.sh
+
+                # Configure PostgreSQL WAL archiving
+                echo "wal_level = replica" >> /etc/postgresql/9.6/main/conf.d/wal-g.conf
+                echo "archive_mode = on" >> /etc/postgresql/9.6/main/conf.d/wal-g.conf
+                echo "archive_command = '/usr/local/bin/wal-g_archive.sh %p'" >> /etc/postgresql/9.6/main/conf.d/wal-g.conf
+                echo "max_wal_senders = 5" >> /etc/postgresql/9.6/main/conf.d/replication.conf
+                echo "listen_addresses = '*'" >> /etc/postgresql/9.6/main/conf.d/replication.conf
+                echo "hot_standby = on" >> /etc/postgresql/9.6/main/conf.d/replication.conf
+                echo "host         replication            replicator      192.168.3.0/24      md5" >> /etc/postgresql/9.6/main/pg_hba.conf
+
+                su -l postgres -c "echo 'export PATH=/usr/lib/postgresql/9.6/bin:\$PATH' >> /var/lib/postgresql/.pgsql_profile"
+                su -l postgres -c "echo '*:*:*:replicator:replicator123' >> /var/lib/postgresql/.pgpass"
+                su -l postgres -c "chmod 0600 /var/lib/postgresql/.pgpass"
+
+                if [ $(hostname) = 'pg96-primary' ]
+                then
+                    systemctl enable postgresql@9.6-main
+                    systemctl restart postgresql@9.6-main
+
+                    su -l postgres -c "psql -c \\"create user replicator replication password 'replicator123'\\""
+                    su -l postgres -c "psql -c \\"create table dts_tables as select * from pg_tables\\""
+
+                    su -l postgres -c "/usr/local/bin/wal-g_backup.sh /var/lib/postgresql/9.6/main"
+                else
+                    systemctl stop postgresql@9.6-main
+                    su -l postgres -c "/usr/local/bin/wal-g_restore.sh /var/lib/postgresql/9.6/main"
+                    echo "standby_mode = on" >> /var/lib/postgresql/9.6/main/recovery.conf
+                    echo "primary_conninfo = 'host=192.168.3.101 user=replicator'" >> /var/lib/postgresql/9.6/main/recovery.conf
+                    echo "restore_command = '/usr/local/bin/wal-g_fetch.sh %f %p'" >> /var/lib/postgresql/9.6/main/recovery.conf
+
+                    systemctl enable postgresql@9.6-main
+                    systemctl start postgresql@9.6-main
+                    su -l postgres -c "psql -c \\"select pg_is_in_recovery()\\""
+                fi
+
+                #
+                # Install PG 12
+                #
+                #echo "create_main_cluster = false" >> /etc/postgresql-common/createcluster.conf
+                #apt-get -y install postgresql-12
+                #systemctl stop postgresql@12-main
+                #systemctl disable postgresql@9.6-main
+            SHELL
+        end
+    end
+end
