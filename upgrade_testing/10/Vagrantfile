@@ -10,6 +10,7 @@ Vagrant.configure("2") do |config|
     config.vm.hostname = NAME
 
     config.vm.provision "shell", inline: <<-SHELL
+        locale-gen en_US && update-locale
         
         #
         # PostgreSQL 10 Setup
@@ -19,6 +20,9 @@ Vagrant.configure("2") do |config|
         echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
         apt-get -y update
         apt-get -y install postgresql-10
+        systemctl stop postgresql@10-main
+        pg_dropcluster 10 main
+        pg_createcluster --lc-collate=en_US --lc-ctype=en_US --lc-messages=en_US --lc-monetary=C --lc-numeric=C --lc-time=C 10 main
 
         #
         # WAL-G Setup
@@ -45,7 +49,7 @@ export AWS_ACCESS_KEY_ID="#{ENV['AWS_ACCESS_KEY_ID']}"
 export AWS_SECRET_ACCESS_KEY="#{ENV['AWS_SECRET_ACCESS_KEY']}"
 export AWS_DEFAULT_REGION="#{ENV['AWS_DEFAULT_REGION']}"
 export AWS_REGION="#{ENV['AWS_REGION']}"
-export WALG_S3_PREFIX="#{ENV['WALG_S3_PREFIX']}"
+export WALG_S3_PREFIX="#{ENV['WALG_S3_PREFIX']}/10_upgrade_01"
 EOF
         chmod 755 /etc/wal-g/environment/env.sh
 
@@ -72,13 +76,19 @@ EOF
         echo "archive_mode = on" >> /etc/postgresql/10/main/conf.d/wal-g.conf
         echo "archive_command = '/usr/local/bin/wal-g_archive.sh %p'" >> /etc/postgresql/10/main/conf.d/wal-g.conf
         systemctl restart postgresql@10-main
+        su -l postgres -c "psql -c \\"create table dts_tables as select * from pg_tables\\""
 
         #
         # Install PG 12
         #
-        #echo "create_main_cluster = false" >> /etc/postgresql-common/createcluster.conf
         apt-get -y install postgresql-12
         systemctl stop postgresql@12-main
+        pg_dropcluster 12 main
+        #pg_upgradecluster -m link --lc-collate=en_US --lc-ctype=en_US --lc-messages=en_US --lc-monetary=C --lc-numeric=C --lc-time=C 10 main
+        pg_createcluster --lc-collate=en_US --lc-ctype=en_US --lc-messages=en_US --lc-monetary=C --lc-numeric=C --lc-time=C 12 main
+
+        systemctl stop postgresql@10-main
         systemctl disable postgresql@10-main
+        su -l postgres -c "sh /vagrant/check_upgrade.sh && sh /vagrant/upgrade.sh"
     SHELL
 end
