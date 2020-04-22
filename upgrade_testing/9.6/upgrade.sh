@@ -6,3 +6,5 @@
   --old-options '-c config_file=/etc/postgresql/9.6/main/postgresql.conf' \
   --new-options '-c config_file=/etc/postgresql/12/main/postgresql.conf' \
   --link
+
+echo "Change ports and start DB now"
