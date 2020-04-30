@@ -8,8 +8,13 @@ servers = [
         :mem => "1024"
     },
     {
-        :name => "pg96-replica",
+        :name => "pg96-replica1",
         :ipaddr => "192.168.3.102",
+        :mem => "1024"
+    },
+    {
+        :name => "pg96-replica2",
+        :ipaddr => "192.168.3.103",
         :mem => "1024"
     }
 ]
@@ -18,7 +23,7 @@ Vagrant.configure("2") do |config|
     servers.each do |server|
         config.vm.define server[:name] do |srv|
 
-            srv.vm.box = "bento/ubuntu-18.04"
+            srv.vm.box = "bento/ubuntu-16.04"
             srv.vm.network :private_network, ip: server[:ipaddr]
             srv.vm.hostname = server[:name]
 
@@ -29,7 +34,8 @@ Vagrant.configure("2") do |config|
             end
 
             srv.vm.provision "shell", inline: <<-SHELL
-                
+                locale-gen en_US && update-locale
+
                 #
                 # PostgreSQL 9.6 Setup
                 #
@@ -37,8 +43,37 @@ Vagrant.configure("2") do |config|
                 curl -s https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
                 echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
                 apt-get -y update
-                apt-get -y install postgresql-9.6
+                apt-get -y install postgresql-9.6 postgresql-9.6-partman
+                if [ $(hostname) = 'pg96-primary' ]
+                then
+                    systemctl stop postgresql@9.6-main
+                    pg_dropcluster 9.6 main
+                    pg_createcluster --lc-collate=en_US --lc-ctype=en_US --lc-messages=C --lc-monetary=C --lc-numeric=C --lc-time=C 9.6 main
+                    systemctl start postgresql@9.6-main
+                    #su -l postgres -c "psql -f /vagrant/template_change.sql"
+                    su -l postgres -c "psql <<EOF
+alter user postgres password 'postgres@123!';
 
+update pg_database set datistemplate = FALSE where datname = 'template1';
+drop database template1;
+create database template1 with template = template0 encoding = 'UTF8' lc_ctype='en_US.utf8' lc_collate='en_US.utf8';
+update pg_database set datistemplate = TRUE where datname = 'template1';
+create database test lc_ctype='en_US' lc_collate='en_US' encoding='LATIN1' template='template0';
+update pg_database set encoding = pg_char_to_encoding('UTF8') where datname = 'test';
+EOF"
+                    su -l postgres -c "psql -l"
+                    su -l postgres -c "psql -d test -c \\"create extension pg_partman\\""
+                    su -l postgres -c "psql -d test -c \\"create table dts_tables as select * from pg_tables\\""
+                fi
+
+                #
+                # SSH Key Authentication
+                #
+                su -l postgres -c "mkdir ~/.ssh; chmod 700 ~/.ssh"
+                su -l postgres -c "cp /vagrant/keys/test_rsa ~/.ssh/id_rsa; chmod 600 ~/.ssh/id_rsa"
+                su -l postgres -c "cp /vagrant/keys/test_rsa.pub ~/.ssh/id_rsa.pub; chmod 600 ~/.ssh/id_rsa.pub"
+                su -l postgres -c "cp /vagrant/keys/test_rsa.pub ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys"
+                
                 #
                 # WAL-G Setup
                 #
@@ -64,7 +99,7 @@ export AWS_ACCESS_KEY_ID="#{ENV['AWS_ACCESS_KEY_ID']}"
 export AWS_SECRET_ACCESS_KEY="#{ENV['AWS_SECRET_ACCESS_KEY']}"
 export AWS_DEFAULT_REGION="#{ENV['AWS_DEFAULT_REGION']}"
 export AWS_REGION="#{ENV['AWS_REGION']}"
-export WALG_S3_PREFIX="#{ENV['WALG_S3_PREFIX']}/pg96_replica_upgrade"
+export WALG_S3_PREFIX="#{ENV['WALG_S3_PREFIX']}/pg96_replica_upgrade/9.6"
 EOF
                 chmod 755 /etc/wal-g/environment/env.sh
 
@@ -112,10 +147,13 @@ EOF
                 echo "max_wal_senders = 5" >> /etc/postgresql/9.6/main/conf.d/replication.conf
                 echo "listen_addresses = '*'" >> /etc/postgresql/9.6/main/conf.d/replication.conf
                 echo "hot_standby = on" >> /etc/postgresql/9.6/main/conf.d/replication.conf
+                echo "max_replication_slots = 10" >> /etc/postgresql/9.6/main/conf.d/replication.conf
                 echo "host         replication            replicator      192.168.3.0/24      md5" >> /etc/postgresql/9.6/main/pg_hba.conf
+                chown postgres:postgres /etc/postgresql/9.6/main/conf.d/*.conf
 
                 su -l postgres -c "echo 'export PATH=/usr/lib/postgresql/9.6/bin:\$PATH' >> /var/lib/postgresql/.pgsql_profile"
                 su -l postgres -c "echo '*:*:*:replicator:replicator123' >> /var/lib/postgresql/.pgpass"
+                su -l postgres -c "echo '*:*:*:postgres:postgres@123!' >> /var/lib/postgresql/.pgpass"
                 su -l postgres -c "chmod 0600 /var/lib/postgresql/.pgpass"
 
                 if [ $(hostname) = 'pg96-primary' ]
@@ -124,7 +162,8 @@ EOF
                     systemctl restart postgresql@9.6-main
 
                     su -l postgres -c "psql -c \\"create user replicator replication password 'replicator123'\\""
-                    su -l postgres -c "psql -c \\"create table dts_tables as select * from pg_tables\\""
+                    su -l postgres -c "psql -c \\"select * from pg_create_physical_replication_slot('replica1')\\""
+                    su -l postgres -c "psql -c \\"select * from pg_create_physical_replication_slot('replica2')\\""
 
                     su -l postgres -c "/usr/local/bin/wal-g_backup.sh /var/lib/postgresql/9.6/main"
                 else
@@ -133,19 +172,72 @@ EOF
                     echo "standby_mode = on" >> /var/lib/postgresql/9.6/main/recovery.conf
                     echo "primary_conninfo = 'host=192.168.3.101 user=replicator'" >> /var/lib/postgresql/9.6/main/recovery.conf
                     echo "restore_command = '/usr/local/bin/wal-g_fetch.sh %f %p'" >> /var/lib/postgresql/9.6/main/recovery.conf
+                    if [ $(hostname) = 'pg96-replica1' ]
+                    then
+                        echo "primary_slot_name = 'replica1'" >> /var/lib/postgresql/9.6/main/recovery.conf
+                    elif [ $(hostname) = 'pg96-replica2' ]
+                    then
+                        echo "primary_slot_name = 'replica2'" >> /var/lib/postgresql/9.6/main/recovery.conf
+                    fi
+                    chown postgres:postgres /var/lib/postgresql/9.6/main/recovery.conf
 
                     systemctl enable postgresql@9.6-main
                     systemctl start postgresql@9.6-main
                     su -l postgres -c "psql -c \\"select pg_is_in_recovery()\\""
                 fi
 
+
                 #
                 # Install PG 12
                 #
-                #echo "create_main_cluster = false" >> /etc/postgresql-common/createcluster.conf
-                #apt-get -y install postgresql-12
-                #systemctl stop postgresql@12-main
+                apt-get -y install postgresql-12 postgresql-12-partman
+                if [ $(hostname) = 'pg96-primary' ]
+                then
+                    systemctl stop postgresql@12-main
+                    pg_dropcluster 12 main
+                    pg_createcluster --lc-collate=en_US --lc-ctype=en_US --lc-messages=C --lc-monetary=C --lc-numeric=C --lc-time=C 12 main
+                    systemctl start postgresql@12-main
+                    su -l postgres -c "psql -p 5433 <<EOF
+update pg_database set datistemplate = FALSE where datname = 'template1';
+drop database template1;
+create database template1 with template = template0 encoding = 'UTF8' lc_ctype='en_US.UTF-8' lc_collate='en_US.UTF-8';
+update pg_database set datistemplate = TRUE where datname = 'template1';
+EOF"
+                    systemctl stop postgresql@12-main
+                else
+                    systemctl stop postgresql@12-main
+                    rm -rf /var/lib/postgresql/12/main
+                fi
+
+                echo "wal_level = replica" >> /etc/postgresql/12/main/conf.d/wal-g.conf
+                echo "archive_mode = on" >> /etc/postgresql/12/main/conf.d/wal-g.conf
+                echo "archive_command = '/usr/local/bin/wal-g_archive.sh %p'" >> /etc/postgresql/12/main/conf.d/wal-g.conf
+                echo "max_wal_senders = 5" >> /etc/postgresql/12/main/conf.d/replication.conf
+                echo "max_replication_slots = 10" >> /etc/postgresql/12/main/conf.d/replication.conf
+                echo "listen_addresses = '*'" >> /etc/postgresql/12/main/conf.d/replication.conf
+                echo "hot_standby = on" >> /etc/postgresql/12/main/conf.d/replication.conf
+                echo "restore_command = '/usr/local/bin/wal-g_fetch.sh %f %p'" >> /etc/postgresql/12/main/conf.d/replication.conf
+                if [ $(hostname) = 'pg96-primary' ]
+                then
+                    # Just pick a random replica to use as possible new primary
+                    echo "primary_conninfo = 'host=192.168.3.102 user=replicator'" >> /etc/postgresql/12/main/conf.d/replication.conf
+                    echo "primary_slot_name = 'replica0'" >> /var/lib/postgresql/9.6/main/recovery.conf
+                else
+                    echo "primary_conninfo = 'host=192.168.3.101 user=replicator'" >> /etc/postgresql/12/main/conf.d/replication.conf
+                    if [ $(hostname) = 'pg96-replica1' ]
+                    then
+                        echo "primary_slot_name = 'replica1'" >> /var/lib/postgresql/9.6/main/recovery.conf
+                    elif [ $(hostname) = 'pg96-replica2' ]
+                    then
+                        echo "primary_slot_name = 'replica2'" >> /var/lib/postgresql/9.6/main/recovery.conf
+                    fi
+                fi
+                chown postgres:postgres /etc/postgresql/12/main/conf.d/*.conf
+                echo "host         replication            replicator      192.168.3.0/24      md5" >> /etc/postgresql/12/main/pg_hba.conf
+
+                #systemctl stop postgresql@9.6-main
                 #systemctl disable postgresql@9.6-main
+                #su -l postgres -c "sh /vagrant/check_upgrade.sh && sh /vagrant/upgrade.sh"
             SHELL
         end
     end
