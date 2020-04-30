@@ -225,10 +225,10 @@ EOF"
                     echo "primary_conninfo = 'host=192.168.3.101 user=replicator'" >> /etc/postgresql/12/main/conf.d/replication.conf
                     if [ $(hostname) = 'pg96-replica1' ]
                     then
-                        echo "primary_slot_name = 'replica1'" >> /var/lib/postgresql/9.6/main/recovery.conf
+                        echo "primary_slot_name = 'replica1'" >> /etc/postgresql/12/main/conf.d/replication.conf
                     elif [ $(hostname) = 'pg96-replica2' ]
                     then
-                        echo "primary_slot_name = 'replica2'" >> /var/lib/postgresql/9.6/main/recovery.conf
+                        echo "primary_slot_name = 'replica2'" >> /etc/postgresql/12/main/conf.d/replication.conf
                     fi
                 fi
                 chown postgres:postgres /etc/postgresql/12/main/conf.d/*.conf
