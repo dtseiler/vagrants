@@ -221,7 +221,6 @@ EOF"
                 then
                     # Just pick a random replica to use as possible new primary
                     echo "primary_conninfo = 'host=192.168.3.102 user=replicator'" >> /etc/postgresql/12/main/conf.d/replication.conf
-                    echo "primary_slot_name = 'replica0'" >> /var/lib/postgresql/9.6/main/recovery.conf
                 else
                     echo "primary_conninfo = 'host=192.168.3.101 user=replicator'" >> /etc/postgresql/12/main/conf.d/replication.conf
                     if [ $(hostname) = 'pg96-replica1' ]
