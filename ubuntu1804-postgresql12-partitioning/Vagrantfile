@@ -62,10 +62,11 @@ CREATE TABLE users
   (LIKE users_part_template INCLUDING DEFAULTS INCLUDING CONSTRAINTS)
 PARTITION BY RANGE (created_at);
 
-SELECT partman.create_parent('public.users', 'created_at', 'native', 'monthly', p_premake := 2, p_template_table := 'public.users_part_template');
+SELECT partman.create_parent('public.users', 'created_at', 'native', 'monthly', p_premake := 2, p_automatic_maintenance := 'off', p_template_table := 'public.users_part_template');
 DROP TABLE users_default;
 ALTER TABLE users_source RENAME TO users_default; 
 ALTER TABLE users ATTACH PARTITION users_default DEFAULT;
+UPDATE partman.part_config SET automatic_maintenance='on' WHERE parent_table='public.users';
 
 \\timing on
 CALL partman.partition_data_proc('public.users', '1 month');
