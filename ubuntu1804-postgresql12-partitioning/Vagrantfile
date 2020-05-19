@@ -1,0 +1,71 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# define hostname
+NAME = "ubuntu1804-pg12"
+
+Vagrant.configure("2") do |config|
+    config.vm.define NAME
+    config.vm.box = "bento/ubuntu-18.04"
+    config.vm.hostname = NAME
+
+    config.vm.provision "shell", inline: <<-SHELL
+        apt-get -y install curl ca-certificates
+        curl -s https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
+        echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+        apt-get -y update
+        apt-get -y install postgresql-12 postgresql-12-partman
+        echo "shared_preload_libraries = 'pg_partman_bgw'" >> /etc/postgresql/12/main/postgresql.conf
+        systemctl restart postgresql
+        su -l postgres -c "createdb test"
+        su -l postgres -c "psql -d test -c \\"create schema partman\\""
+        su -l postgres -c "psql -d test -c \\"create extension pg_partman schema partman\\""
+        su -l postgres -c "psql -l"
+        su -l postgres -c "psql -d test -c \\"\\dx\\""
+
+        su -l postgres -c "psql -d test <<EOF
+CREATE TABLE users (
+  id    INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  email VARCHAR(40) NOT NULL UNIQUE,
+  created_at    TIMESTAMP NOT NULL
+);
+
+INSERT INTO users (email, created_at)
+SELECT
+  'user_' || seq || '@' || (
+    CASE (RANDOM() * 2)::INT
+      WHEN 0 THEN 'gmail'
+      WHEN 1 THEN 'hotmail'
+      WHEN 2 THEN 'yahoo'
+    END
+  ) || '.com' AS email,
+  timestamp '2016-01-10 20:00:00' +
+       random() * (timestamp '2020-01-20 20:00:00' -
+                   timestamp '2016-01-10 20:00:00')
+FROM GENERATE_SERIES(1, 200000) seq;
+
+CREATE INDEX users_created_at_idx ON users(created_at);
+
+SELECT date_trunc('month', created_at) as created_month, count(*)
+FROM users
+GROUP BY created_month
+ORDER BY created_month;
+
+VACUUM ANALYZE users;
+
+CREATE TABLE users_partitioned
+  (LIKE users INCLUDING DEFAULTS INCLUDING CONSTRAINTS)
+PARTITION BY RANGE (created_at);
+
+--SELECT partman.create_parent('public.users', 'created_at', 'partman', 'monthly', p_premake := 2);
+SELECT partman.create_parent('public.users_partitioned', 'created_at', 'native', 'monthly', p_premake := 2);
+
+\\timing on
+CALL partman.partition_data_proc('public.users_partitioned', '1 week', p_source_table := 'public.users');
+REINDEX TABLE users;
+ALTER TABLE users_partitioned ADD PRIMARY KEY (id, created_at);
+EOF"
+
+    #su -l postgres -c "python partition_data.py -c host=/var/run/postgresql -p public.users -t created_at -i 100"
+    SHELL
+end
