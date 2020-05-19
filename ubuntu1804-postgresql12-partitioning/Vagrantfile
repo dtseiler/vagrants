@@ -42,7 +42,7 @@ SELECT
   timestamp '2016-01-10 20:00:00' +
        random() * (timestamp '2020-01-20 20:00:00' -
                    timestamp '2016-01-10 20:00:00')
-FROM GENERATE_SERIES(1, 200000) seq;
+FROM GENERATE_SERIES(1, 500000) seq;
 
 CREATE INDEX users_created_at_idx ON users(created_at);
 
@@ -53,19 +53,26 @@ ORDER BY created_month;
 
 VACUUM ANALYZE users;
 
-CREATE TABLE users_partitioned_template
+CREATE TABLE users_part_template
   (LIKE users INCLUDING ALL);
 
-CREATE TABLE users_partitioned
-  (LIKE users INCLUDING DEFAULTS INCLUDING CONSTRAINTS)
+ALTER TABLE users RENAME TO users_default_new; 
+
+CREATE TABLE users
+  (LIKE users_part_template INCLUDING DEFAULTS INCLUDING CONSTRAINTS)
 PARTITION BY RANGE (created_at);
 
 --SELECT partman.create_parent('public.users', 'created_at', 'partman', 'monthly', p_premake := 2);
-SELECT partman.create_parent('public.users_partitioned', 'created_at', 'native', 'monthly', p_premake := 2, p_template_table := 'public.users_partitioned_template');
+SELECT partman.create_parent('public.users', 'created_at', 'native', 'monthly', p_premake := 2, p_template_table := 'public.users_part_template');
+DROP TABLE users_default;
+ALTER TABLE users_default_new RENAME TO users_default; 
+ALTER TABLE users ATTACH PARTITION users_default DEFAULT;
 
 \\timing on
-CALL partman.partition_data_proc('public.users_partitioned', '1 week', p_source_table := 'public.users');
-REINDEX TABLE users;
+--CALL partman.partition_data_proc('public.users', '1 week', p_source_table := 'public.users');
+CALL partman.partition_data_proc('public.users', '1 month');
+VACUUM ANALYZE users;
+REINDEX TABLE users_default;
 --ALTER TABLE users_partitioned ADD PRIMARY KEY (id, created_at);
 EOF"
     SHELL
