@@ -65,7 +65,5 @@ CALL partman.partition_data_proc('public.users_partitioned', '1 week', p_source_
 REINDEX TABLE users;
 ALTER TABLE users_partitioned ADD PRIMARY KEY (id, created_at);
 EOF"
-
-    #su -l postgres -c "python partition_data.py -c host=/var/run/postgresql -p public.users -t created_at -i 100"
     SHELL
 end
