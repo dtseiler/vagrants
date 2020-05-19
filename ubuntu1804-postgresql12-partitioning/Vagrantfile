@@ -53,17 +53,20 @@ ORDER BY created_month;
 
 VACUUM ANALYZE users;
 
+CREATE TABLE users_partitioned_template
+  (LIKE users INCLUDING ALL);
+
 CREATE TABLE users_partitioned
   (LIKE users INCLUDING DEFAULTS INCLUDING CONSTRAINTS)
 PARTITION BY RANGE (created_at);
 
 --SELECT partman.create_parent('public.users', 'created_at', 'partman', 'monthly', p_premake := 2);
-SELECT partman.create_parent('public.users_partitioned', 'created_at', 'native', 'monthly', p_premake := 2);
+SELECT partman.create_parent('public.users_partitioned', 'created_at', 'native', 'monthly', p_premake := 2, p_template_table := 'public.users_partitioned_template');
 
 \\timing on
 CALL partman.partition_data_proc('public.users_partitioned', '1 week', p_source_table := 'public.users');
 REINDEX TABLE users;
-ALTER TABLE users_partitioned ADD PRIMARY KEY (id, created_at);
+--ALTER TABLE users_partitioned ADD PRIMARY KEY (id, created_at);
 EOF"
     SHELL
 end
