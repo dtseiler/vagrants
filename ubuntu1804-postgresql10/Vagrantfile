@@ -17,5 +17,6 @@ Vagrant.configure("2") do |config|
         apt-get -y update
         apt-get -y install postgresql-10 postgresql-10-partman
         echo "shared_preload_libraries = 'pg_partman_bgw'" >> /etc/postgresql/10/main/postgresql.conf
+        systemctl restart postgresql
     SHELL
 end
