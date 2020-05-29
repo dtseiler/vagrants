@@ -1,0 +1,46 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# define hostname
+NAME = "pgagroal-test"
+
+Vagrant.configure("2") do |config|
+    config.vm.define NAME
+    config.vm.box = "bento/ubuntu-18.04"
+    config.vm.hostname = NAME
+
+    config.vm.provision "shell", inline: <<-SHELL
+        apt-get -y install curl ca-certificates
+        curl -s https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
+        echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+        apt-get -y update
+        apt-get -y install postgresql-12
+
+        # Build pgagroal
+        apt-get -y install cmake gcc-8 openssl libev-dev python3-docutils
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-8 8
+        update-alternatives --set gcc /usr/bin/gcc-8
+
+        wget -q https://github.com/agroal/pgagroal/releases/download/0.7.0/pgagroal-0.7.0.tar.gz
+        tar -xzf pgagroal-0.7.0.tar.gz
+        cd pgagroal-0.7.0
+        mkdir build
+        cd build
+        cmake -DCMAKE_INSTALL_PREFIX=/usr/local ..
+        make
+        #sudo make install
+        make install
+
+        # /usr/local/lib is not in LD_LIBRARY_PATH by default
+        echo "/usr/local/lib" >> /etc/ld.so.conf.d/pgagroal.conf
+        ldconfig
+
+        # Configure pgagroal logging
+        sed -i 's\/^log_type .*\/log_type = file\/' /usr/local/etc/pgagroal/pgagroal.conf
+        sed -i 's\/^log_level .*\/log_level = debug1\/' /usr/local/etc/pgagroal/pgagroal.conf
+        sed -i 's\/^log_path .*\/log_path = \\/var\\/log\\/postgresql\\/pgagroal.log\/' /usr/local/etc/pgagroal/pgagroal.conf
+
+        # Start pgagroal in daemon mode
+        su -l postgres -c "/usr/local/bin/pgagroal -d -c /usr/local/etc/pgagroal/pgagroal.conf -a /usr/local/etc/pgagroal/pgagroal_hba.conf"
+    SHELL
+end
