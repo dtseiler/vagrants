@@ -21,14 +21,13 @@ Vagrant.configure("2") do |config|
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-8 8
         update-alternatives --set gcc /usr/bin/gcc-8
 
-        wget -q https://github.com/agroal/pgagroal/releases/download/0.7.0/pgagroal-0.7.0.tar.gz
+        curl -sSLO https://github.com/agroal/pgagroal/releases/download/0.7.0/pgagroal-0.7.0.tar.gz
         tar -xzf pgagroal-0.7.0.tar.gz
         cd pgagroal-0.7.0
         mkdir build
         cd build
         cmake -DCMAKE_INSTALL_PREFIX=/usr/local ..
         make
-        #sudo make install
         make install
 
         # /usr/local/lib is not in LD_LIBRARY_PATH by default
@@ -36,9 +35,9 @@ Vagrant.configure("2") do |config|
         ldconfig
 
         # Configure pgagroal logging
-        sed -i 's\/^log_type .*\/log_type = file\/' /usr/local/etc/pgagroal/pgagroal.conf
-        sed -i 's\/^log_level .*\/log_level = debug1\/' /usr/local/etc/pgagroal/pgagroal.conf
-        sed -i 's\/^log_path .*\/log_path = \\/var\\/log\\/postgresql\\/pgagroal.log\/' /usr/local/etc/pgagroal/pgagroal.conf
+        sed -i 's#^log_type .*#log_type = file#' /usr/local/etc/pgagroal/pgagroal.conf
+        sed -i 's#^log_level .*#log_level = debug1#' /usr/local/etc/pgagroal/pgagroal.conf
+        sed -i 's#^log_path .*#log_path = /var/log/postgresql/pgagroal.log#' /usr/local/etc/pgagroal/pgagroal.conf
 
         # Start pgagroal in daemon mode
         su -l postgres -c "/usr/local/bin/pgagroal -d -c /usr/local/etc/pgagroal/pgagroal.conf -a /usr/local/etc/pgagroal/pgagroal_hba.conf"
