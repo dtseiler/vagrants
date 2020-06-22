@@ -26,6 +26,5 @@ deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-s
 deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security multiverse
 EOF
         apt-get -y update
-        apt-get -y upgrade
     SHELL
 end
