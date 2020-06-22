@@ -23,7 +23,7 @@ Vagrant.configure("2") do |config|
     servers.each do |server|
         config.vm.define server[:name] do |srv|
 
-            srv.vm.box = "bento/ubuntu-16.04"
+            srv.vm.box = "bento/ubuntu-18.04"
             srv.vm.network :private_network, ip: server[:ipaddr]
             srv.vm.hostname = server[:name]
 
@@ -35,13 +35,28 @@ Vagrant.configure("2") do |config|
 
             srv.vm.provision "shell", inline: <<-SHELL
                 locale-gen en_US && update-locale
+                cat > /etc/apt/sources.list <<EOF
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic main restricted
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-updates main restricted
+
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic universe
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-updates universe
+
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic multiverse
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-updates multiverse
+
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security main restricted
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security universe
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security multiverse
+EOF
+                apt-get -y update
+                apt-get -y install curl ca-certificates daemontools
 
                 #
                 # PostgreSQL 9.6 Setup
                 #
-                apt-get -y install curl ca-certificates
-                curl -s https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
-                echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+                curl -s #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/ACCC4CF8.asc | apt-key add -
+                echo "deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/pub/repos/apt/ bionic-pgdg main" > /etc/apt/sources.list.d/pgdg.list
                 apt-get -y update
                 apt-get -y install postgresql-9.6 postgresql-9.6-partman
                 if [ $(hostname) = 'pg96-primary' ]
@@ -63,7 +78,31 @@ update pg_database set encoding = pg_char_to_encoding('UTF8') where datname = 't
 EOF"
                     su -l postgres -c "psql -l"
                     su -l postgres -c "psql -d test -c \\"create extension pg_partman\\""
-                    su -l postgres -c "psql -d test -c \\"create table dts_tables as select * from pg_tables\\""
+                    su -l postgres -c "psql -d test <<EOF
+CREATE TABLE users (
+  id    SERIAL PRIMARY KEY,
+  email VARCHAR(40) NOT NULL UNIQUE,
+  created_at    TIMESTAMP NOT NULL
+);
+
+INSERT INTO users (email, created_at)
+SELECT
+  'user_' || seq || '@' || (
+    CASE (RANDOM() * 2)::INT
+      WHEN 0 THEN 'gmail'
+      WHEN 1 THEN 'hotmail'
+      WHEN 2 THEN 'yahoo'
+    END
+  ) || '.com' AS email,
+  timestamp '2016-01-10 20:00:00' +
+       random() * (timestamp '2020-01-20 20:00:00' -
+                   timestamp '2016-01-10 20:00:00')
+FROM GENERATE_SERIES(1, 500000) seq;
+
+CREATE INDEX users_created_at_idx ON users(created_at);
+
+VACUUM ANALYZE users;
+EOF"
                 fi
 
                 #
@@ -77,73 +116,36 @@ EOF"
                 #
                 # WAL-G Setup
                 #
-                wget -nv https://github.com/wal-g/wal-g/releases/download/v0.2.9/wal-g.linux-amd64.tar.gz
+                wget -nv https://github.com/wal-g/wal-g/releases/download/v0.2.15/wal-g.linux-amd64.tar.gz
                 tar -xzf wal-g.linux-amd64.tar.gz
                 mv wal-g /usr/local/bin
                 rm wal-g.linux-amd64.tar.gz
 
                 mkdir -p /etc/wal-g/environment
-                chown -R postgres:postgres /etc/wal-g
                 chmod 0755 /etc/wal-g
                 chmod 0755 /etc/wal-g/environment
                 
                 #
                 # WAL-G Scripts
                 #
-                cat > /etc/wal-g/environment/env.sh <<EOF
-export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
-export PGHOST=/var/run/postgresql
-export PGPORT=5432
-export AWS_ACCOUNT_ID="#{ENV['AWS_ACCOUNT_ID']}"
-export AWS_ACCESS_KEY_ID="#{ENV['AWS_ACCESS_KEY_ID']}"
-export AWS_SECRET_ACCESS_KEY="#{ENV['AWS_SECRET_ACCESS_KEY']}"
-export AWS_DEFAULT_REGION="#{ENV['AWS_DEFAULT_REGION']}"
-export AWS_REGION="#{ENV['AWS_REGION']}"
-export WALG_S3_PREFIX="#{ENV['WALG_S3_PREFIX']}/pg96_replica_upgrade/9.6"
-EOF
-                chmod 755 /etc/wal-g/environment/env.sh
-
-                cat > /usr/local/bin/wal-g_backup.sh <<EOF
-#!/bin/bash
-
-source /etc/wal-g/environment/env.sh
-
-wal-g backup-push \\$1
-EOF
-                chmod 755 /usr/local/bin/wal-g_backup.sh
-
-                cat > /usr/local/bin/wal-g_restore.sh <<EOF
-#!/bin/bash
-
-source /etc/wal-g/environment/env.sh
-
-rm -rf \\$1
-wal-g backup-fetch \\$1 LATEST
-EOF
-                chmod 755 /usr/local/bin/wal-g_restore.sh
-
-                cat > /usr/local/bin/wal-g_archive.sh <<EOF
-#!/bin/bash
-
-source /etc/wal-g/environment/env.sh
-
-wal-g wal-push \\$1
-EOF
-                chmod 755 /usr/local/bin/wal-g_archive.sh
-
-                cat > /usr/local/bin/wal-g_fetch.sh <<EOF
-#!/bin/bash
-
-source /etc/wal-g/environment/env.sh
-
-wal-g wal-fetch \\$1 \\$2
-EOF
-                chmod 755 /usr/local/bin/wal-g_fetch.sh
+                ENVDIR=/etc/wal-g/environment
+                echo "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin" > $ENVDIR/PATH
+                echo "/var/run/postgresql" > $ENVDIR/PGHOST
+                echo "/var/lib/postgresql/9.6/main" > $ENVDIR/PGDATA
+                echo "5432" > $ENVDIR/PGPORT
+                echo "postgres" > $ENVDIR/PGUSER
+                echo "#{ENV['AWS_ACCOUNT_ID']}" > $ENVDIR/AWS_ACCOUNT_ID
+                echo "#{ENV['AWS_ACCESS_KEY_ID']}" > $ENVDIR/AWS_ACCESS_KEY_ID
+                echo "#{ENV['AWS_SECRET_ACCESS_KEY']}" > $ENVDIR/AWS_SECRET_ACCESS_KEY
+                echo "#{ENV['AWS_DEFAULT_REGION']}" > $ENVDIR/AWS_DEFAULT_REGION
+                #echo "#{ENV['WALG_STAGING_GPG_KEY_ID']}" > $ENVDIR/WALE_GPG_KEY_ID
+                echo "#{ENV['WALG_S3_PREFIX']}/replica_upgrade_testing/9.6" > $ENVDIR/WALG_S3_PREFIX
+                chown -R postgres:postgres $ENVDIR
 
                 # Configure PostgreSQL WAL archiving
                 echo "wal_level = replica" >> /etc/postgresql/9.6/main/conf.d/wal-g.conf
                 echo "archive_mode = on" >> /etc/postgresql/9.6/main/conf.d/wal-g.conf
-                echo "archive_command = '/usr/local/bin/wal-g_archive.sh %p'" >> /etc/postgresql/9.6/main/conf.d/wal-g.conf
+                echo "archive_command = 'envdir /etc/wal-g/environment /usr/local/bin/wal-g wal-push %p'" >> /etc/postgresql/9.6/main/conf.d/wal-g.conf
                 echo "max_wal_senders = 5" >> /etc/postgresql/9.6/main/conf.d/replication.conf
                 echo "listen_addresses = '*'" >> /etc/postgresql/9.6/main/conf.d/replication.conf
                 echo "hot_standby = on" >> /etc/postgresql/9.6/main/conf.d/replication.conf
@@ -165,13 +167,14 @@ EOF
                     su -l postgres -c "psql -c \\"select * from pg_create_physical_replication_slot('replica1')\\""
                     su -l postgres -c "psql -c \\"select * from pg_create_physical_replication_slot('replica2')\\""
 
-                    su -l postgres -c "/usr/local/bin/wal-g_backup.sh /var/lib/postgresql/9.6/main"
+                    su -l postgres -c "envdir /etc/wal-g/environment /usr/local/bin/wal-g backup-push /var/lib/postgresql/9.6/main"
                 else
                     systemctl stop postgresql@9.6-main
-                    su -l postgres -c "/usr/local/bin/wal-g_restore.sh /var/lib/postgresql/9.6/main"
+                    rm -rf /var/lib/postgresql/9.6/main
+                    su -l postgres -c "envdir /etc/wal-g/environment /usr/local/bin/wal-g backup-fetch /var/lib/postgresql/9.6/main LATEST"
                     echo "standby_mode = on" >> /var/lib/postgresql/9.6/main/recovery.conf
                     echo "primary_conninfo = 'host=192.168.3.101 user=replicator'" >> /var/lib/postgresql/9.6/main/recovery.conf
-                    echo "restore_command = '/usr/local/bin/wal-g_fetch.sh %f %p'" >> /var/lib/postgresql/9.6/main/recovery.conf
+                    echo "restore_command = 'envdir /etc/wal-g/environment /usr/local/bin/wal-g wal-fetch %f %p'" >> /var/lib/postgresql/9.6/main/recovery.conf
                     if [ $(hostname) = 'pg96-replica1' ]
                     then
                         echo "primary_slot_name = 'replica1'" >> /var/lib/postgresql/9.6/main/recovery.conf
@@ -194,16 +197,16 @@ EOF
                 if [ $(hostname) = 'pg96-primary' ]
                 then
                     systemctl stop postgresql@12-main
-                    pg_dropcluster 12 main
-                    pg_createcluster --lc-collate=en_US --lc-ctype=en_US --lc-messages=C --lc-monetary=C --lc-numeric=C --lc-time=C 12 main
-                    systemctl start postgresql@12-main
-                    su -l postgres -c "psql -p 5433 <<EOF
-update pg_database set datistemplate = FALSE where datname = 'template1';
-drop database template1;
-create database template1 with template = template0 encoding = 'UTF8' lc_ctype='en_US.UTF-8' lc_collate='en_US.UTF-8';
-update pg_database set datistemplate = TRUE where datname = 'template1';
-EOF"
-                    systemctl stop postgresql@12-main
+                    ###pg_dropcluster 12 main
+                    ###pg_createcluster --lc-collate=en_US --lc-ctype=en_US --lc-messages=C --lc-monetary=C --lc-numeric=C --lc-time=C 12 main
+                    ###systemctl start postgresql@12-main
+                    ###su -l postgres -c "psql -p 5433 <<EOF
+###update pg_database set datistemplate = FALSE where datname = 'template1';
+###drop database template1;
+###create database template1 with template = template0 encoding = 'UTF8' lc_ctype='en_US.UTF-8' lc_collate='en_US.UTF-8';
+###update pg_database set datistemplate = TRUE where datname = 'template1';
+###EOF"
+                    ###systemctl stop postgresql@12-main
                 else
                     systemctl stop postgresql@12-main
                     rm -rf /var/lib/postgresql/12/main
@@ -211,12 +214,12 @@ EOF"
 
                 echo "wal_level = replica" >> /etc/postgresql/12/main/conf.d/wal-g.conf
                 echo "archive_mode = on" >> /etc/postgresql/12/main/conf.d/wal-g.conf
-                echo "archive_command = '/usr/local/bin/wal-g_archive.sh %p'" >> /etc/postgresql/12/main/conf.d/wal-g.conf
+                echo "archive_command = 'envdir /etc/wal-g/environment /usr/local/bin/wal-g wal-push %p'" >> /etc/postgresql/12/main/conf.d/wal-g.conf
                 echo "max_wal_senders = 5" >> /etc/postgresql/12/main/conf.d/replication.conf
                 echo "max_replication_slots = 10" >> /etc/postgresql/12/main/conf.d/replication.conf
                 echo "listen_addresses = '*'" >> /etc/postgresql/12/main/conf.d/replication.conf
                 echo "hot_standby = on" >> /etc/postgresql/12/main/conf.d/replication.conf
-                echo "restore_command = '/usr/local/bin/wal-g_fetch.sh %f %p'" >> /etc/postgresql/12/main/conf.d/replication.conf
+                echo "restore_command = 'envdir /etc/wal-g/environment /usr/local/bin/wal-g wal-fetch %f %p'" >> /etc/postgresql/12/main/conf.d/replication.conf
                 if [ $(hostname) = 'pg96-primary' ]
                 then
                     # Just pick a random replica to use as possible new primary
