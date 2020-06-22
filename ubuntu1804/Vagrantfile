@@ -2,7 +2,7 @@
 # vi: set ft=ruby :
 
 # define hostname
-NAME = "ubuntu1804-pg10"
+NAME = "ubuntu1804-base"
 
 Vagrant.configure("2") do |config|
     config.vm.define NAME
@@ -26,13 +26,6 @@ deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-s
 deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security multiverse
 EOF
         apt-get -y update
-        apt-get -y install curl ca-certificates
-        curl -s #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/ACCC4CF8.asc | apt-key add -
-        echo "deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/pub/repos/apt/ bionic-pgdg main" > /etc/apt/sources.list.d/pgdg.list
-        apt-get -y update
-        apt-get -y install postgresql-10
-        #apt-get -y install postgresql-10 postgresql-10-partman
-        #echo "shared_preload_libraries = 'pg_partman_bgw'" >> /etc/postgresql/10/main/postgresql.conf
-        #systemctl restart postgresql
+        apt-get -y upgrade
     SHELL
 end
