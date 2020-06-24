@@ -52,6 +52,10 @@ EOF"
         su -l postgres -c "psql -l"
 
         su -l postgres -c "psql -d test <<EOF
+CREATE EXTENSION pgcrypto;
+CREATE EXTENSION pgstattuple;
+CREATE EXTENSION plpgsql;
+
 CREATE TABLE users (
   id    SERIAL PRIMARY KEY,
   email VARCHAR(40) NOT NULL UNIQUE,
@@ -108,38 +112,16 @@ EOF"
         chown -R postgres:postgres $ENVDIR
 
         # Configure PostgreSQL WAL archiving
-        echo "wal_level = replica" >> /etc/postgresql/9.6/main/conf.d/wal-g.conf
-        echo "archive_mode = on" >> /etc/postgresql/9.6/main/conf.d/wal-g.conf
-        echo "archive_command = 'envdir /etc/wal-g/environment /usr/local/bin/wal-g wal-push %p'" >> /etc/postgresql/9.6/main/conf.d/wal-g.conf
+        echo "wal_level = replica" >> /etc/postgresql/9.6/main/postgresql.conf
+        echo "archive_mode = on" >> /etc/postgresql/9.6/main/postgresql.conf
+        echo "archive_command = 'envdir /etc/wal-g/environment /usr/local/bin/wal-g wal-push %p'" >> /etc/postgresql/9.6/main/postgresql.conf
         systemctl restart postgresql@9.6-main
 
         #
         # Install PG 12
         #
+        echo "create_main_cluster = false" >> /etc/postgresql-common/createcluster.conf
         apt-get -y install postgresql-12
-        systemctl stop postgresql@12-main
 
-        pg_dropcluster 12 main
-        ###pg_createcluster --lc-collate=en_US --lc-ctype=en_US --lc-messages=en_US --lc-monetary=C --lc-numeric=C --lc-time=C 12 main
-        #pg_createcluster 12 main -- --data-checksums ## Can't upgrade directly from no checksums to checksums
-        #pg_createcluster 12 main
-
-        ###echo "wal_level = replica" >> /etc/postgresql/12/main/conf.d/wal-g.conf
-        ###echo "archive_mode = on" >> /etc/postgresql/12/main/conf.d/wal-g.conf
-        ###echo "archive_command = 'envdir /etc/wal-g/environment /usr/local/bin/wal-g wal-push %p'" >> /etc/postgresql/12/main/conf.d/wal-g.conf
-
-        ###systemctl start postgresql@12-main
-        ###su -l postgres -c "psql -p 5433 <<EOF
-###update pg_database set datistemplate = FALSE where datname = 'template1';
-###drop database template1;
-###create database template1 with template = template0 encoding = 'UTF8' lc_ctype='en_US.utf8' lc_collate='en_US.utf8';
-###update pg_database set datistemplate = TRUE where datname = 'template1';
-###EOF"
-        ###su -l postgres -c "psql -p 5433 -l"
-        ###systemctl stop postgresql@12-main
-
-        #systemctl stop postgresql@9.6-main
-        #systemctl disable postgresql@9.6-main
-        #su -l postgres -c "sh /vagrant/check_upgrade.sh && sh /vagrant/upgrade.sh"
     SHELL
 end
