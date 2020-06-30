@@ -36,10 +36,8 @@ EOF
         systemctl restart postgresql@12-main
 
         # Build pgbackrest dev-azure branch
-        apt-get -y install rsync git devscripts build-essential valgrind lcov autoconf \
-            autoconf-archive libssl-dev zlib1g-dev libxml2-dev libpq-dev pkg-config \
-            libxml-checker-perl libyaml-libyaml-perl libdbd-pg-perl liblz4-dev liblz4-tool \
-            zstd libzstd-dev bzip2 libbz2-dev unzip
+        apt-get -y install make gcc libpq-dev libssl-dev libxml2-dev pkg-config \
+               liblz4-dev libzstd-dev libbz2-dev libz-dev unzip
         curl -sLO https://github.com/pgbackrest/pgbackrest/archive/dev-azure.zip
         unzip dev-azure.zip
         cd pgbackrest-dev-azure/src
@@ -52,11 +50,14 @@ EOF
 pg1-path=/var/lib/postgresql/12/main
 
 [global]
+repo1-cipher-pass=$(openssl rand -base64 48)
+repo1-cipher-type=aes-256-cbc
 repo1-type=azure
 repo1-path=/pgbackrest-test-$(date '+%Y%m%d%H%M%S')
 repo1-azure-account=#{ENV['AZURE_STORAGE_ACCOUNT']}
 repo1-azure-container=#{ENV['AZURE_STORAGE_CONTAINER']}
 repo1-azure-key=#{ENV['AZURE_STORAGE_ACCESS_KEY']}
+repo1-retention-full=2
 process-max=4
 EOF
         chown -R postgres:postgres /etc/pgbackrest
@@ -64,6 +65,7 @@ EOF
         chown -R postgres:postgres /var/log/pgbackrest
 
         su -l postgres -c "pgbackrest --stanza=main --log-level-console=info stanza-create"
-        su -l postgres -c "pgbackrest --stanza=main --log-level-console=info backup"
+        su -l postgres -c "pgbackrest --stanza=main backup"
+        su -l postgres -c "pgbackrest --stanza=main --log-level-console=info info"
     SHELL
 end
