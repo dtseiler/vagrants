@@ -40,13 +40,16 @@ EOF
 
         su -l postgres -c "psql -d test <<EOF
 CREATE TABLE users (
-  id    INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  --id    INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  id    VARCHAR(36) PRIMARY KEY,
   email VARCHAR(40) NOT NULL UNIQUE,
   created_at    TIMESTAMP NOT NULL
 );
 
-INSERT INTO users (email, created_at)
+-- Use a fake UUID generator here
+INSERT INTO users (id, email, created_at)
 SELECT
+  md5(random()::text || clock_timestamp()::text)::uuid as id,
   'user_' || seq || '@' || (
     CASE (RANDOM() * 2)::INT
       WHEN 0 THEN 'gmail'
@@ -57,7 +60,7 @@ SELECT
   timestamp '2016-01-10 20:00:00' +
        random() * (timestamp '2020-01-20 20:00:00' -
                    timestamp '2016-01-10 20:00:00')
-FROM GENERATE_SERIES(1, 500000) seq;
+FROM GENERATE_SERIES(1, 5000000) seq;
 
 CREATE INDEX users_created_at_idx ON users(created_at);
 
@@ -86,7 +89,21 @@ UPDATE partman.part_config SET automatic_maintenance='on' WHERE parent_table='pu
 \\timing on
 CALL partman.partition_data_proc('public.users', '1 month');
 VACUUM ANALYZE users;
+VACUUM ANALYZE users_default;
 REINDEX TABLE users_default;
+
+SELECT date_trunc('month', created_at) as created_month, count(*)
+FROM users
+GROUP BY created_month
+ORDER BY created_month;
+
+SELECT nspname || '.' || relname AS "relation",
+    pg_size_pretty(pg_relation_size(C.oid)) AS "size"
+  FROM pg_class C
+  LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
+  WHERE nspname NOT IN ('pg_catalog', 'information_schema')
+    AND relname like '%default%'
+  ORDER BY pg_relation_size(C.oid) DESC;
 EOF"
     SHELL
 end
