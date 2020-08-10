@@ -1,0 +1,144 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+timestamp = Time.now()
+backrest_cipher = %x(openssl rand -base64 48)
+
+servers = [
+    {
+        :name => "postgres-foo",
+        :ipaddr => "192.168.96.102",
+        :mem => "1024"
+    },
+    {
+        :name => "postgres-foo-standby",
+        :ipaddr => "192.168.96.103",
+        :mem => "1024"
+    },
+    {
+        :name => "pgbackrest-repo",
+        :ipaddr => "192.168.96.101",
+        :mem => "1024"
+    }
+]
+
+Vagrant.configure("2") do |config|
+    servers.each do |server|
+        config.vm.define server[:name] do |srv|
+
+            srv.vm.box = "bento/ubuntu-18.04"
+            srv.vm.network :private_network, ip: server[:ipaddr]
+            srv.vm.hostname = server[:name]
+            backrest_stanza = server[:name]
+
+            srv.vm.provider :virtualbox do |vb|
+                vb.name = server[:name]
+                vb.memory = server[:mem]
+                vb.gui = false
+            end
+
+            srv.vm.provision "shell", inline: <<-SHELL
+                cat > /etc/apt/sources.list <<EOF
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic main restricted
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-updates main restricted
+
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic universe 
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-updates universe
+
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic multiverse
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-updates multiverse
+
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security main restricted
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security universe
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security multiverse
+EOF
+                apt-get -y update
+                apt-get -y install curl ca-certificates
+                curl -s #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/ACCC4CF8.asc | apt-key add -
+                echo "deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/pub/repos/apt/ bionic-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+                apt-get -y update
+
+                apt-get -y install pgbackrest
+                if [ $(hostname) != 'pgbackrest-repo' ]
+                then
+                    apt-get -y install postgresql-9.6
+                fi
+
+                #
+                # SSH Key Authentication (for pg_upgrade w/ rsync testing)
+                #
+                if [ -d /vagrant/keys -a -f /vagrant/keys/test_rsa ]
+                then
+                    su -l postgres -c "mkdir -p ~/.ssh; chmod 700 ~/.ssh"
+                    su -l postgres -c "cp /vagrant/keys/test_rsa ~/.ssh/id_rsa; chmod 600 ~/.ssh/id_rsa"
+                    su -l postgres -c "cp /vagrant/keys/test_rsa.pub ~/.ssh/id_rsa.pub; chmod 600 ~/.ssh/id_rsa.pub"
+                    su -l postgres -c "cp /vagrant/keys/test_rsa.pub ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys"
+                fi
+                echo "    StrictHostKeyChecking no" >> /etc/ssh/ssh_config
+
+                if [ $(hostname) = 'pgbackrest-repo' ]
+                then
+                    mkdir -p /etc/pgbackrest/conf.d
+                    chown -R postgres:postgres /etc/pgbackrest
+
+                    cat > /etc/pgbackrest.conf <<EOF
+[postgres-foo]
+pg1-host=192.168.96.102
+pg1-path=/var/lib/postgresql/9.6/main
+pg2-host=192.168.96.103
+pg2-path=/var/lib/postgresql/9.6/main
+backup-standby=y
+
+[global]
+compress-type=lz
+repo1-cipher-pass=#{backrest_cipher}
+repo1-cipher-type=aes-256-cbc
+repo1-type=s3
+repo1-s3-endpoint=s3.amazonaws.com
+repo1-s3-key=#{ENV['AWS_ACCESS_KEY_ID']}
+repo1-s3-key-secret=#{ENV['AWS_SECRET_ACCESS_KEY']}
+repo1-s3-region=#{ENV['AWS_REGION']}
+repo1-s3-bucket=#{ENV['AWS_S3_BUCKET']}
+repo1-path=/pgbackrest-test/test-#{timestamp.strftime('%Y%m%d%H%M%S')}
+repo1-retention-full=2
+process-max=2
+EOF
+
+                    su -l postgres -c "pgbackrest --stanza=postgres-foo --log-level-console=info stanza-create"
+                    su -l postgres -c "pgbackrest --stanza=postgres-foo --log-level-console=info check"
+                    su -l postgres -c "pgbackrest --stanza=postgres-foo --log-level-console=info backup"
+                else
+                    echo "wal_level = replica" >> /etc/postgresql/9.6/main/postgresql.conf
+                    echo "archive_mode = on" >> /etc/postgresql/9.6/main/postgresql.conf
+                    echo "archive_command = 'pgbackrest --stanza=#{backrest_stanza} archive-push %p'" >> /etc/postgresql/9.6/main/postgresql.conf
+                    echo "max_replication_slots = 10" >> /etc/postgresql/9.6/main/postgresql.conf
+                    echo "host         replication            replicator      192.168.96.0/24      md5" >> /etc/postgresql/9.6/main/pg_hba.conf
+
+                    su -l postgres -c "echo 'export PATH=/usr/lib/postgresql/9.6/bin:\$PATH' >> /var/lib/postgresql/.pgsql_profile"
+                    su -l postgres -c "echo '*:*:*:replicator:replicator123' >> /var/lib/postgresql/.pgpass"
+                    su -l postgres -c "echo '*:*:*:postgres:postgres@123!' >> /var/lib/postgresql/.pgpass"
+                    su -l postgres -c "chmod 0600 /var/lib/postgresql/.pgpass"
+
+                    cat > /etc/pgbackrest.conf <<EOF
+[#{backrest_stanza}]
+pg1-path=/var/lib/postgresql/9.6/main
+
+[global]
+log-level-console=info
+repo1-host=192.168.96.101
+repo1-host-user=postgres
+EOF
+                    if [ $(hostname) = 'postgres-foo' ]
+                    then
+                        su -l postgres -c "psql -c \\"create user replicator replication password 'replicator123'\\""
+                        systemctl restart postgresql@9.6-main
+                        #su -l postgres -c "pgbackrest --stanza=#{backrest_stanza} --log-level-console=info check"
+                    else
+                        systemctl stop postgresql@9.6-main
+                        rm -rf /var/lib/postgresql/9.6/main
+                    fi
+                fi
+            SHELL
+        end
+    end
+end

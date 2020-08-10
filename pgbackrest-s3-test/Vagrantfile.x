@@ -1,0 +1,90 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+timestamp = Time.now()
+backrest_cipher = %x(openssl rand -base64 48)
+backrest_stanza = "postgres-foo"
+
+servers = [
+    {
+        :name => "postgres-foo",
+        :ipaddr => "192.168.96.102",
+        :mem => "1024",
+        :pgversion => "9.6"
+    },
+    {
+        :name => "postgres-bar",
+        :ipaddr => "192.168.96.104",
+        :mem => "1024",
+        :pgversion => "10"
+    }
+]
+
+Vagrant.configure("2") do |config|
+    servers.each do |server|
+        config.vm.define server[:name] do |srv|
+
+            srv.vm.box = "bento/ubuntu-18.04"
+            srv.vm.network :private_network, ip: server[:ipaddr]
+            srv.vm.hostname = server[:name]
+
+            srv.vm.provider :virtualbox do |vb|
+                vb.name = server[:name]
+                vb.memory = server[:mem]
+                vb.gui = false
+            end
+
+            srv.vm.provision "shell", inline: <<-SHELL
+                cat > /etc/apt/sources.list <<EOF
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic main restricted
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-updates main restricted
+
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic universe 
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-updates universe
+
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic multiverse
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-updates multiverse
+
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security main restricted
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security universe
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security multiverse
+EOF
+                apt-get -y update
+                apt-get -y install curl ca-certificates
+                curl -s #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/ACCC4CF8.asc | apt-key add -
+                echo "deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/pub/repos/apt/ bionic-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+                apt-get -y update
+                apt-get -y install postgresql-#{server[:pgversion]} pgbackrest
+
+                echo "wal_level = replica" >> /etc/postgresql/${server[:pgversion]}/main/postgresql.conf
+                echo "archive_mode = on" >> /etc/postgresql/${server[:pgversion]}/main/postgresql.conf
+                echo "archive_command = 'pgbackrest --stanza=#{backrest_stanza} archive-push %p'" >> /etc/postgresql/${server[:pgversion]}/main/postgresql.conf
+
+                cat > /etc/pgbackrest.conf <<EOF
+[#{backrest_stanza}]
+pg1-path=/var/lib/postgresql/${server[:pgversion]}/main
+
+[global]
+log-level-console=info
+compress-type=lz
+delta=y
+repo1-cipher-pass=#{backrest_cipher}
+repo1-cipher-type=aes-256-cbc
+repo1-type=s3
+repo1-s3-endpoint=s3.amazonaws.com
+repo1-s3-key=#{ENV['AWS_ACCESS_KEY_ID']}
+repo1-s3-key-secret=#{ENV['AWS_SECRET_ACCESS_KEY']}
+repo1-s3-region=#{ENV['AWS_REGION']}
+repo1-s3-bucket=#{ENV['AWS_S3_BUCKET']}
+repo1-path=/pgbackrest-test/test-#{timestamp.strftime('%Y%m%d%H%M%S')}
+repo1-retention-full=2
+process-max=2
+EOF
+                su -l postgres -c "pgbackrest --stanza=#{backrest_stanza} --log-level-console=info stanza-create"
+                su -l postgres -c "pgbackrest --stanza=#{backrest_stanza} --log-level-console=info check"
+                su -l postgres -c "pgbackrest --stanza=#{backrest_stanza} --log-level-console=info backup"
+                su -l postgres -c "pgbackrest --stanza=#{backrest_stanza} --log-level-console=info info"
+            SHELL
+        end
+    end
+end
