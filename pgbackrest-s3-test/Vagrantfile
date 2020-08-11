@@ -113,19 +113,18 @@ EOF
                     su -l postgres -c "pgbackrest --stanza=postgres-foo --log-level-console=info backup"
                 else
                     systemctl stop postgresql@9.6-main
-                    rm -rf /var/lib/postgresql/9.6/main
-                    cat >> /etc/pgbackrest.conf <<EOF
-recovery-option=standby_mode=on
-recovery-option=primary_conninfo=host=192.168.96.102 user=replicator
-recovery-option=recovery_target_timeline=latest
-EOF
-                    su -l postgres -c "mkdir /var/lib/postgresql/9.6/main && chmod 700 /var/lib/postgresql/9.6/main"
-                    su -l postgres -c "pgbackrest --stanza=postgres-foo --log-level-console=info restore"
                     cat >> /etc/pgbackrest.conf <<EOF
 pg2-host=192.168.96.102
 pg2-path=/var/lib/postgresql/9.6/main
+recovery-option=standby_mode=on
+recovery-option=primary_conninfo=host=192.168.96.102 user=replicator
+recovery-option=recovery_target_timeline=latest
 backup-standby=y
 EOF
+                    rm -rf /var/lib/postgresql/9.6/main
+                    su -l postgres -c "mkdir /var/lib/postgresql/9.6/main && chmod 700 /var/lib/postgresql/9.6/main"
+                    su -l postgres -c "pgbackrest --stanza=postgres-foo --log-level-console=info restore"
+
                     systemctl start postgresql@9.6-main
                     sleep 30
                     su -l postgres -c "pgbackrest --stanza=postgres-foo --log-level-console=info --type=full backup"
