@@ -1,0 +1,137 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+timestamp = Time.now()
+backrest_cipher = %x(openssl rand -base64 48)
+backrest_stanza = "postgres-foo"
+pg_version = "9.6"
+
+servers = [
+    {
+        :name => "postgres-foo",
+        :ipaddr => "192.168.96.102",
+        :mem => "1024"
+    },
+    {
+        :name => "postgres-foo-standby",
+        :ipaddr => "192.168.96.103",
+        :mem => "1024"
+    }
+]
+
+Vagrant.configure("2") do |config|
+    servers.each do |server|
+        config.vm.define server[:name] do |srv|
+
+            srv.vm.box = "bento/ubuntu-18.04"
+            srv.vm.network :private_network, ip: server[:ipaddr]
+            srv.vm.hostname = server[:name]
+
+            srv.vm.provider :virtualbox do |vb|
+                vb.name = server[:name]
+                vb.memory = server[:mem]
+                vb.gui = false
+            end
+
+            srv.vm.provision "shell", inline: <<-SHELL
+                cat > /etc/apt/sources.list <<EOF
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic main restricted
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-updates main restricted
+
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic universe 
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-updates universe
+
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic multiverse
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-updates multiverse
+
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security main restricted
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security universe
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security multiverse
+EOF
+                apt-get -y update
+                apt-get -y install curl ca-certificates
+                curl -s #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/ACCC4CF8.asc | apt-key add -
+                echo "deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/pub/repos/apt/ bionic-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+                apt-get -y update
+
+                apt-get -y install postgresql-#{pg_version} pgbackrest
+
+                #
+                # SSH Key Authentication (for pg_upgrade w/ rsync testing)
+                #
+                if [ -d /vagrant/keys -a -f /vagrant/keys/test_rsa ]
+                then
+                    su -l postgres -c "mkdir -p ~/.ssh; chmod 700 ~/.ssh"
+                    su -l postgres -c "cp /vagrant/keys/test_rsa ~/.ssh/id_rsa; chmod 600 ~/.ssh/id_rsa"
+                    su -l postgres -c "cp /vagrant/keys/test_rsa.pub ~/.ssh/id_rsa.pub; chmod 600 ~/.ssh/id_rsa.pub"
+                    su -l postgres -c "cp /vagrant/keys/test_rsa.pub ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys"
+                fi
+                echo "    StrictHostKeyChecking no" >> /etc/ssh/ssh_config
+
+                echo "listen_addresses = '*'" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+                echo "max_wal_senders = 10" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+                echo "max_replication_slots = 10" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+                echo "wal_level = replica" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+                echo "hot_standby = on" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+                echo "archive_mode = on" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+                echo "archive_command = 'pgbackrest --stanza=#{backrest_stanza} archive-push %p'" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+                echo "max_replication_slots = 10" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+                echo "host         replication            replicator      192.168.96.0/24      md5" >> /etc/postgresql/#{pg_version}/main/pg_hba.conf
+
+                su -l postgres -c "echo 'export PATH=/usr/lib/postgresql/#{pg_version}/bin:\$PATH' >> /var/lib/postgresql/.pgsql_profile"
+                su -l postgres -c "echo '*:*:*:replicator:replicator123' >> /var/lib/postgresql/.pgpass"
+                su -l postgres -c "echo '*:*:*:postgres:postgres@123!' >> /var/lib/postgresql/.pgpass"
+                su -l postgres -c "chmod 0600 /var/lib/postgresql/.pgpass"
+
+                cat > /etc/pgbackrest.conf <<EOF
+[global]
+log-level-console=info
+compress-type=lz4
+repo1-cipher-pass=#{backrest_cipher}
+repo1-cipher-type=aes-256-cbc
+repo1-type=s3
+repo1-s3-endpoint=s3.amazonaws.com
+repo1-s3-key=#{ENV['AWS_ACCESS_KEY_ID']}
+repo1-s3-key-secret=#{ENV['AWS_SECRET_ACCESS_KEY']}
+repo1-s3-region=#{ENV['AWS_REGION']}
+repo1-s3-bucket=#{ENV['AWS_S3_BUCKET']}
+repo1-path=/pgbackrest-test/test-#{timestamp.strftime('%Y%m%d%H%M%S')}
+repo1-retention-full=2
+process-max=2
+
+[#{backrest_stanza}]
+pg1-path=/var/lib/postgresql/#{pg_version}/main
+pg1-port=5432
+EOF
+                if [ $(hostname) = 'postgres-foo' ]
+                then
+                    su -l postgres -c "psql -c \\"create user replicator replication password 'replicator123'\\""
+                    su -l postgres -c "psql -c \\"select pg_create_physical_replication_slot('starsky');\\""
+                    systemctl restart postgresql@#{pg_version}-main
+                    su -l postgres -c "pgbackrest --stanza=postgres-foo --log-level-console=info stanza-create"
+                    su -l postgres -c "pgbackrest --stanza=postgres-foo --log-level-console=info check"
+                    su -l postgres -c "pgbackrest --stanza=postgres-foo --log-level-console=info backup"
+                else
+                    systemctl stop postgresql@#{pg_version}-main
+                    cat >> /etc/pgbackrest.conf <<EOF
+pg2-host=192.168.96.102
+pg2-port=5432
+pg2-path=/var/lib/postgresql/#{pg_version}/main
+recovery-option=primary_conninfo=host=192.168.96.102 user=replicator
+recovery-option=recovery_target_timeline=latest
+recovery-option=primary_slot_name=starsky
+backup-standby=y
+EOF
+                    rm -rf /var/lib/postgresql/#{pg_version}/main
+                    su -l postgres -c "mkdir /var/lib/postgresql/#{pg_version}/main && chmod 700 /var/lib/postgresql/#{pg_version}/main"
+                    su -l postgres -c "pgbackrest --stanza=postgres-foo --log-level-console=info --type=standby restore"
+                    #su -l postgres -c "pgbackrest --stanza=postgres-foo --log-level-console=info --type=standby --recovery-option=\\"primary_conninfo=host=192.168.96.102 user=replicator\\" --recovery-option=\\"recovery_target_timeline=latest\\" restore"
+
+                    systemctl start postgresql@#{pg_version}-main
+                    sleep 30
+                    su -l postgres -c "pgbackrest --stanza=postgres-foo --log-level-console=info --type=full backup"
+                fi
+            SHELL
+        end
+    end
+end
