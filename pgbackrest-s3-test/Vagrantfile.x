@@ -11,12 +11,12 @@ servers = [
         :ipaddr => "192.168.96.102",
         :mem => "1024",
         :pgversion => "9.6"
-    },
-    {
-        :name => "postgres-bar",
-        :ipaddr => "192.168.96.104",
-        :mem => "1024",
-        :pgversion => "10"
+    #},
+    #{
+        #:name => "postgres-bar",
+        #:ipaddr => "192.168.96.104",
+        #:mem => "1024",
+        #:pgversion => "10"
     }
 ]
 
@@ -54,19 +54,22 @@ EOF
                 curl -s #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/ACCC4CF8.asc | apt-key add -
                 echo "deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/pub/repos/apt/ bionic-pgdg main" > /etc/apt/sources.list.d/pgdg.list
                 apt-get -y update
-                apt-get -y install postgresql-#{server[:pgversion]} pgbackrest
+                #apt-get -y install postgresql-#{server[:pgversion]} pgbackrest
+                apt-get -y install postgresql-#{server[:pgversion]}
 
-                echo "wal_level = replica" >> /etc/postgresql/${server[:pgversion]}/main/postgresql.conf
-                echo "archive_mode = on" >> /etc/postgresql/${server[:pgversion]}/main/postgresql.conf
-                echo "archive_command = 'pgbackrest --stanza=#{backrest_stanza} archive-push %p'" >> /etc/postgresql/${server[:pgversion]}/main/postgresql.conf
+                echo "wal_level = replica" >> /etc/postgresql/#{server[:pgversion]}/main/postgresql.conf
+                echo "archive_mode = on" >> /etc/postgresql/#{server[:pgversion]}/main/postgresql.conf
+                echo "archive_command = 'pgbackrest --stanza=#{backrest_stanza} archive-push %p'" >> /etc/postgresql/#{server[:pgversion]}/main/postgresql.conf
+                systemctl restart postgresql@9.6-main
 
+                apt-get -y install pgbackrest
                 cat > /etc/pgbackrest.conf <<EOF
 [#{backrest_stanza}]
-pg1-path=/var/lib/postgresql/${server[:pgversion]}/main
+pg1-path=/var/lib/postgresql/#{server[:pgversion]}/main
 
 [global]
 log-level-console=info
-compress-type=lz
+compress-type=lz4
 delta=y
 repo1-cipher-pass=#{backrest_cipher}
 repo1-cipher-type=aes-256-cbc
