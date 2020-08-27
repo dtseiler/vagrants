@@ -68,6 +68,8 @@ EOF
                 fi
                 echo "    StrictHostKeyChecking no" >> /etc/ssh/ssh_config
 
+                #echo "cluster_name = '#{backrest_stanza}'" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+                echo "cluster_name = '$(hostname)'" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
                 echo "listen_addresses = '*'" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
                 echo "max_wal_senders = 10" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
                 echo "max_replication_slots = 10" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
@@ -79,7 +81,7 @@ EOF
                 echo "host         replication            replicator      192.168.96.0/24      md5" >> /etc/postgresql/#{pg_version}/main/pg_hba.conf
 
                 su -l postgres -c "echo 'export PATH=/usr/lib/postgresql/#{pg_version}/bin:\$PATH' >> /var/lib/postgresql/.pgsql_profile"
-                su -l postgres -c "echo '*:*:*:replicator:replicator123' >> /var/lib/postgresql/.pgpass"
+                su -l postgres -c "echo '*:*:replication:replicator:replicator123' >> /var/lib/postgresql/.pgpass"
                 su -l postgres -c "echo '*:*:*:postgres:postgres@123!' >> /var/lib/postgresql/.pgpass"
                 su -l postgres -c "chmod 0600 /var/lib/postgresql/.pgpass"
 
@@ -92,7 +94,7 @@ repo1-cipher-type=aes-256-cbc
 repo1-type=azure
 repo1-azure-account=#{ENV['AZURE_STORAGE_ACCOUNT']}
 repo1-azure-key=#{ENV['AZURE_STORAGE_ACCESS_KEY']}
-repo1-azure-container=#{ENV['AZURE_STORAG_CONTAINER']}
+repo1-azure-container=#{ENV['AZURE_STORAGE_CONTAINER']}
 repo1-path=/pgbackrest-dts-test/test-#{timestamp.strftime('%Y%m%d%H%M%S')}
 repo1-retention-full=2
 process-max=2
