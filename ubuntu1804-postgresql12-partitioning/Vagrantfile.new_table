@@ -41,7 +41,7 @@ EOF
         su -l postgres -c "psql -d test <<EOF
 CREATE TABLE users_part_template(
   id    VARCHAR(36) NOT NULL PRIMARY KEY,
-  email VARCHAR(40) NOT NULL UNIQUE,
+  email VARCHAR(40) NOT NULL,
   created_at    TIMESTAMP NOT NULL
 );
 CREATE INDEX users_created_at_idx ON users_part_template(created_at);
