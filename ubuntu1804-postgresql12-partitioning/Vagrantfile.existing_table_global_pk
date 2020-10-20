@@ -40,9 +40,8 @@ EOF
 
         su -l postgres -c "psql -aX -d test <<EOF
 CREATE TABLE users (
-  --id    INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   id    VARCHAR(36) PRIMARY KEY,
-  email VARCHAR(40) NOT NULL UNIQUE,
+  email VARCHAR(40) NOT NULL,
   created_at    TIMESTAMP NOT NULL
 );
 
@@ -70,18 +69,19 @@ ORDER BY created_day;
 
 VACUUM ANALYZE users;
 
-CREATE TABLE users_part_template
-  (LIKE users INCLUDING ALL);
-
 --
 -- Downtime would BEGIN here
 --
 
+\\d users
+
+ALTER TABLE users DROP CONSTRAINT users_pkey;
 ALTER TABLE users RENAME TO users_source; 
 
 CREATE TABLE users
-  (LIKE users_part_template INCLUDING DEFAULTS INCLUDING CONSTRAINTS)
+  (LIKE users_source INCLUDING ALL)
 PARTITION BY RANGE (created_at);
+ALTER TABLE users ADD PRIMARY KEY (id, created_at);
 
 SELECT relname, n_live_tup
 FROM pg_stat_all_tables
@@ -90,7 +90,6 @@ ORDER BY relname;
 
 SELECT partman.create_parent('public.users', 'created_at', 'native', 'daily', 
     p_automatic_maintenance := 'off', 
-    p_template_table := 'public.users_part_template', 
     p_debug := true, 
     p_start_partition := '2020-10-21'
 );
@@ -126,6 +125,8 @@ SELECT relname, n_live_tup
 FROM pg_stat_all_tables
 WHERE relname like 'users%'
 ORDER BY relname;
+
+\\d users
 EOF"
 
     SHELL
