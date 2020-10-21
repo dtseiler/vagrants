@@ -60,7 +60,7 @@ SELECT
        random() * (now() - timestamp '2020-07-01 00:00:00')
 FROM GENERATE_SERIES(1, 5000000) seq;
 
-CREATE INDEX users_created_at_idx ON users(created_at);
+CREATE INDEX users_created_at_idx ON users (created_at);
 
 SELECT date_trunc('day', created_at) as created_day, count(*)
 FROM users
@@ -77,6 +77,7 @@ VACUUM ANALYZE users;
 
 \\timing on
 
+ALTER INDEX users_created_at_idx RENAME TO users_default_created_at_idx;
 ALTER TABLE users DROP CONSTRAINT users_pkey;
 ALTER TABLE users RENAME TO users_source; 
 
