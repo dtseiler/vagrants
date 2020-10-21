@@ -39,8 +39,9 @@ EOF
         su -l postgres -c "psql -d test -c \\"\\dx\\""
 
         su -l postgres -c "psql -aX -d test <<EOF
+\\timing on
+
 CREATE TABLE users (
-  --id    INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   id    VARCHAR(36) PRIMARY KEY,
   email VARCHAR(40) NOT NULL UNIQUE,
   created_at    TIMESTAMP NOT NULL
@@ -61,7 +62,7 @@ SELECT
        random() * (now() - timestamp '2020-07-01 00:00:00')
 FROM GENERATE_SERIES(1, 5000000) seq;
 
-CREATE INDEX users_created_at_idx ON users(created_at);
+CREATE INDEX users_created_at_idx ON users (created_at);
 
 SELECT date_trunc('day', created_at) as created_day, count(*)
 FROM users
@@ -73,15 +74,22 @@ VACUUM ANALYZE users;
 CREATE TABLE users_part_template
   (LIKE users INCLUDING ALL);
 
+\\d users_part_template
+
 --
 -- Downtime would BEGIN here
 --
 
 ALTER TABLE users RENAME TO users_source; 
 
+ALTER INDEX users_created_at_idx rename to users_default_created_at_idx;
+--DROP INDEX users_created_at_idx;
+
 CREATE TABLE users
   (LIKE users_part_template INCLUDING DEFAULTS INCLUDING CONSTRAINTS)
 PARTITION BY RANGE (created_at);
+
+CREATE INDEX users_created_at_idx ON users (created_at);
 
 SELECT relname, n_live_tup
 FROM pg_stat_all_tables
@@ -92,7 +100,7 @@ SELECT partman.create_parent('public.users', 'created_at', 'native', 'daily',
     p_automatic_maintenance := 'off', 
     p_template_table := 'public.users_part_template', 
     p_debug := true, 
-    p_start_partition := '2020-10-21'
+    p_start_partition := 'tomorrow'
 );
 DROP TABLE users_default;
 ALTER TABLE users_source RENAME TO users_default; 
@@ -108,7 +116,6 @@ FROM pg_stat_all_tables
 WHERE relname like 'users%'
 ORDER BY relname;
 
-\\timing on
 CALL partman.partition_data_proc('public.users');
 VACUUM ANALYZE users;
 VACUUM ANALYZE users_default;
@@ -127,6 +134,5 @@ FROM pg_stat_all_tables
 WHERE relname like 'users%'
 ORDER BY relname;
 EOF"
-
     SHELL
 end

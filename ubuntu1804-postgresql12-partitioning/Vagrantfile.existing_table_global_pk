@@ -69,11 +69,13 @@ ORDER BY created_day;
 
 VACUUM ANALYZE users;
 
+\\d users
+
 --
 -- Downtime would BEGIN here
 --
 
-\\d users
+\\timing on
 
 ALTER TABLE users DROP CONSTRAINT users_pkey;
 ALTER TABLE users RENAME TO users_source; 
@@ -91,7 +93,7 @@ ORDER BY relname;
 SELECT partman.create_parent('public.users', 'created_at', 'native', 'daily', 
     p_automatic_maintenance := 'off', 
     p_debug := true, 
-    p_start_partition := '2020-10-21'
+    p_start_partition := 'tomorrow'
 );
 DROP TABLE users_default;
 ALTER TABLE users_source RENAME TO users_default; 
@@ -107,7 +109,6 @@ FROM pg_stat_all_tables
 WHERE relname like 'users%'
 ORDER BY relname;
 
-\\timing on
 CALL partman.partition_data_proc('public.users');
 VACUUM ANALYZE users;
 VACUUM ANALYZE users_default;
@@ -127,6 +128,7 @@ WHERE relname like 'users%'
 ORDER BY relname;
 
 \\d users
+\\d users_default
 EOF"
 
     SHELL
