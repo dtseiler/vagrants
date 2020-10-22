@@ -39,17 +39,17 @@ EOF
         su -l postgres -c "psql -d test -c \\"\\dx\\""
 
         su -l postgres -c "psql -aX -d test <<EOF
-CREATE TABLE users (
-  id    VARCHAR(36) PRIMARY KEY,
-  email VARCHAR(40) NOT NULL,
+CREATE TABLE orders (
+  order_id      VARCHAR(36) PRIMARY KEY,
+  email         VARCHAR(40) NOT NULL,
   created_at    TIMESTAMP NOT NULL
 );
 
 -- Use a fake UUID generator here
-INSERT INTO users (id, email, created_at)
+INSERT INTO orders (order_id, email, created_at)
 SELECT
-  md5(random()::text || clock_timestamp()::text)::uuid as id,
-  'user_' || seq || '@' || (
+  md5(random()::text || clock_timestamp()::text)::uuid as order_id,
+  'order_' || seq || '@' || (
     CASE (RANDOM() * 2)::INT
       WHEN 0 THEN 'gmail'
       WHEN 1 THEN 'hotmail'
@@ -60,16 +60,16 @@ SELECT
        random() * (now() - timestamp '2020-07-01 00:00:00')
 FROM GENERATE_SERIES(1, 5000000) seq;
 
-CREATE INDEX users_created_at_idx ON users (created_at);
+CREATE INDEX orders_created_at_idx ON orders (created_at);
 
 SELECT date_trunc('day', created_at) as created_day, count(*)
-FROM users
+FROM orders
 GROUP BY created_day
 ORDER BY created_day;
 
-VACUUM ANALYZE users;
+VACUUM ANALYZE orders;
 
-\\d users
+\\d orders
 
 --
 -- Downtime would BEGIN here
@@ -77,29 +77,29 @@ VACUUM ANALYZE users;
 
 \\timing on
 
-ALTER INDEX users_created_at_idx RENAME TO users_default_created_at_idx;
-ALTER TABLE users DROP CONSTRAINT users_pkey;
-ALTER TABLE users RENAME TO users_source; 
+ALTER INDEX orders_created_at_idx RENAME TO orders_default_created_at_idx;
+ALTER TABLE orders DROP CONSTRAINT orders_pkey;
+ALTER TABLE orders RENAME TO orders_source; 
 
-CREATE TABLE users
-  (LIKE users_source INCLUDING ALL)
+CREATE TABLE orders
+  (LIKE orders_source INCLUDING ALL)
 PARTITION BY RANGE (created_at);
-ALTER TABLE users ADD PRIMARY KEY (id, created_at);
+ALTER TABLE orders ADD PRIMARY KEY (order_id, created_at);
 
 SELECT relname, n_live_tup
 FROM pg_stat_all_tables
-WHERE relname like 'users%'
+WHERE relname like 'orders%'
 ORDER BY relname;
 
-SELECT partman.create_parent('public.users', 'created_at', 'native', 'daily', 
+SELECT partman.create_parent('public.orders', 'created_at', 'native', 'daily', 
     p_automatic_maintenance := 'off', 
     p_debug := true, 
     p_start_partition := 'tomorrow'
 );
-DROP TABLE users_default;
-ALTER TABLE users_source RENAME TO users_default; 
-ALTER TABLE users ATTACH PARTITION users_default DEFAULT;
-UPDATE partman.part_config SET automatic_maintenance='on' WHERE parent_table='public.users';
+DROP TABLE orders_default;
+ALTER TABLE orders_source RENAME TO orders_default; 
+ALTER TABLE orders ATTACH PARTITION orders_default DEFAULT;
+UPDATE partman.part_config SET automatic_maintenance='on' WHERE parent_table='public.orders';
 
 --
 -- Downtime would END here
@@ -107,29 +107,32 @@ UPDATE partman.part_config SET automatic_maintenance='on' WHERE parent_table='pu
 
 SELECT relname, n_live_tup
 FROM pg_stat_all_tables
-WHERE relname like 'users%'
+WHERE relname like 'orders%'
 ORDER BY relname;
 
-CALL partman.partition_data_proc('public.users');
-VACUUM ANALYZE users;
-VACUUM ANALYZE users_default;
-REINDEX TABLE users_default;
+CALL partman.partition_data_proc('public.orders');
+VACUUM ANALYZE orders;
+VACUUM ANALYZE orders_default;
+REINDEX TABLE orders_default;
 
 SELECT relname, n_live_tup
 FROM pg_stat_all_tables
-WHERE relname like 'users%'
+WHERE relname like 'orders%'
 ORDER BY relname;
 
-UPDATE partman.part_config SET retention = '30 days', retention_keep_table = false where parent_table='public.users';
-SELECT partman.run_maintenance('public.users');
+UPDATE partman.part_config 
+SET retention = '30 days', retention_keep_table = false 
+WHERE parent_table='public.orders';
+
+SELECT partman.run_maintenance('public.orders');
 
 SELECT relname, n_live_tup
 FROM pg_stat_all_tables
-WHERE relname like 'users%'
+WHERE relname like 'orders%'
 ORDER BY relname;
 
-\\d users
-\\d users_default
+\\d orders
+\\d orders_default
 EOF"
 
     SHELL

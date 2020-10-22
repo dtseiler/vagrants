@@ -39,24 +39,24 @@ EOF
         su -l postgres -c "psql -d test -c \\"\\dx\\""
 
         su -l postgres -c "psql -d test <<EOF
-CREATE TABLE users_part_template(
-  id    VARCHAR(36) NOT NULL PRIMARY KEY,
-  email VARCHAR(40) NOT NULL,
+CREATE TABLE orders_part_template(
+  order_id      VARCHAR(36) NOT NULL PRIMARY KEY,
+  email         VARCHAR(40) NOT NULL,
   created_at    TIMESTAMP NOT NULL
 );
-CREATE INDEX users_created_at_idx ON users_part_template(created_at);
+CREATE INDEX orders_created_at_idx ON orders_part_template(created_at);
 
-CREATE TABLE users
-  (LIKE users_part_template INCLUDING DEFAULTS INCLUDING CONSTRAINTS)
+CREATE TABLE orders
+  (LIKE orders_part_template INCLUDING DEFAULTS INCLUDING CONSTRAINTS)
 PARTITION BY RANGE (created_at);
 
-SELECT partman.create_parent('public.users', 'created_at', 'native', 'daily', p_premake := 2, p_automatic_maintenance := 'on', p_template_table := 'public.users_part_template', p_start_partition := '2020-07-01', p_debug := true);
+SELECT partman.create_parent('public.orders', 'created_at', 'native', 'daily', p_premake := 2, p_automatic_maintenance := 'on', p_template_table := 'public.orders_part_template', p_start_partition := '2020-07-01', p_debug := true);
 
 -- Use a fake UUID generator here
-INSERT INTO users (id, email, created_at)
+INSERT INTO orders (order_id, email, created_at)
 SELECT
-  md5(random()::text || clock_timestamp()::text)::uuid as id,
-  'user_' || seq || '@' || (
+  md5(random()::text || clock_timestamp()::text)::uuid as order_id,
+  'order_' || seq || '@' || (
     CASE (RANDOM() * 2)::INT
       WHEN 0 THEN 'gmail'
       WHEN 1 THEN 'hotmail'
@@ -67,19 +67,22 @@ SELECT
        random() * (now() - timestamp '2020-07-01 00:00:00')
 FROM GENERATE_SERIES(1, 5000000) seq;
 
-VACUUM ANALYZE users;
+VACUUM ANALYZE orders;
 
 SELECT relname, n_live_tup
 FROM pg_stat_all_tables
-WHERE relname like 'users%'
+WHERE relname like 'orders%'
 ORDER BY relname;
 
-UPDATE partman.part_config SET retention = '60 days', retention_keep_table = false where parent_table='public.users';
-SELECT partman.run_maintenance('public.users');
+UPDATE partman.part_config 
+SET retention = '60 days', retention_keep_table = false 
+WHERE parent_table='public.orders';
+
+SELECT partman.run_maintenance('public.orders');
 
 SELECT relname, n_live_tup
 FROM pg_stat_all_tables
-WHERE relname like 'users%'
+WHERE relname like 'orders%'
 ORDER BY relname;
 
 EOF"
