@@ -79,48 +79,85 @@ EOF
                 su -l postgres -c "psql -d test -c \\"\\dx\\""
 
                 su -l postgres -c "psql -d test <<EOF
-CREATE TABLE users (
-  id    SERIAL PRIMARY KEY,
-  email VARCHAR(40) NOT NULL UNIQUE,
+CREATE TABLE orders (
+  order_id      VARCHAR(36) PRIMARY KEY,
+  email         VARCHAR(40) NOT NULL,
   created_at    TIMESTAMP NOT NULL
 );
 
-INSERT INTO users (email, created_at)
+-- Use a fake UUID generator here
+INSERT INTO orders (order_id, email, created_at)
 SELECT
-  'user_' || seq || '@' || (
+  md5(random()::text || clock_timestamp()::text)::uuid as order_id,
+  'order_' || seq || '@' || (
     CASE (RANDOM() * 2)::INT
       WHEN 0 THEN 'gmail'
       WHEN 1 THEN 'hotmail'
       WHEN 2 THEN 'yahoo'
     END
   ) || '.com' AS email,
-  timestamp '2020-08-01 00:00:00' +
-       random() * (timestamp '2020-09-01 00:00:00' -
-                   timestamp '2020-08-01 00:00:00')
-FROM GENERATE_SERIES(1, 10000000) seq;
+  timestamp '2020-07-01 00:00:00' +
+       random() * (now() - timestamp '2020-07-01 00:00:00')
+FROM GENERATE_SERIES(1, 5000000) seq;
 
-CREATE INDEX users_created_at_idx ON users(created_at);
+CREATE INDEX orders_email_idx ON orders (email);
+CREATE INDEX orders_created_at_idx ON orders (created_at);
+
+VACUUM ANALYZE orders;
 
 SELECT date_trunc('day', created_at) as created_day, count(*)
-FROM users
+FROM orders
 GROUP BY created_day
 ORDER BY created_day;
 
-VACUUM ANALYZE users;
-
-SELECT partman.create_parent('public.users', 'created_at', 'partman', 'daily', p_start_partition := '2020-08-01', p_premake := 2);
+SELECT partman.create_parent(
+    'public.orders', 
+    'created_at', 
+    'partman', 
+    'daily', 
+    p_start_partition := '2020-07-01',
+    p_debug := true
+);
 EOF"
 
                 # Partition the data
-                su -l postgres -c 'python /usr/lib/postgresql/10/bin/partition_data.py -c "dbname=test user=postgres" -p public.users -t time -i "1 hour"'
+                su -l postgres -c 'python /usr/lib/postgresql/10/bin/partition_data.py -c "dbname=test user=postgres" -p public.orders -t time -i "1 hour"'
 
                 su -l postgres -c "psql -d test <<EOF
-VACUUM ANALYZE users;
-REINDEX TABLE users;
+VACUUM ANALYZE orders;
+REINDEX TABLE orders;
+
+UPDATE partman.part_config
+SET retention = '30 days', retention_keep_table = false
+WHERE parent_table='public.orders';
+
+SELECT partman.run_maintenance('public.orders');
 
 SELECT relname, n_live_tup FROM pg_stat_all_tables
-WHERE relname LIKE 'users%'
+WHERE relname LIKE 'orders%'
 ORDER BY relname;
+
+-- Insert some more data
+INSERT INTO orders (order_id, email, created_at)
+SELECT
+  md5(random()::text || clock_timestamp()::text)::uuid as order_id,
+  'order_' || seq || '@' || (
+    CASE (RANDOM() * 2)::INT
+      WHEN 0 THEN 'gmail'
+      WHEN 1 THEN 'hotmail'
+      WHEN 2 THEN 'yahoo'
+    END
+  ) || '.com' AS email,
+  timestamp '2020-10-15 00:00:00' +
+       random() * (now() - timestamp '2020-10-15 00:00:00')
+FROM GENERATE_SERIES(1, 5000000) seq;
+
+ANALYZE orders;
+
+SELECT relname, n_live_tup FROM pg_stat_all_tables
+WHERE relname LIKE 'orders%'
+ORDER BY relname;
+
 EOF"
             SHELL
         end
