@@ -31,6 +31,7 @@ EOF
         apt-get -y update
         apt-get -y install postgresql-12 postgresql-12-partman
         echo "shared_preload_libraries = 'pg_partman_bgw'" >> /etc/postgresql/12/main/postgresql.conf
+        echo "pg_partman_bgw.dbname = 'test'" >> /etc/postgresql/12/main/postgresql.conf
         systemctl restart postgresql
         su -l postgres -c "createdb test"
         su -l postgres -c "psql -d test -c \\"create schema partman\\""
