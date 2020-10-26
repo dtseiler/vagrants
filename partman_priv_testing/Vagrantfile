@@ -1,0 +1,112 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# define hostname
+NAME = "ubuntu1804-pg12"
+
+Vagrant.configure("2") do |config|
+    config.vm.define NAME
+    config.vm.box = "bento/ubuntu-18.04"
+    config.vm.hostname = NAME
+
+    config.vm.provision "shell", inline: <<-SHELL
+        cat > /etc/apt/sources.list <<EOF
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic main restricted
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-updates main restricted
+
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic universe
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-updates universe
+
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic multiverse
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-updates multiverse
+
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security main restricted
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security universe
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security multiverse
+EOF
+        apt-get -y update
+        apt-get -y install curl ca-certificates
+        curl -s #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/ACCC4CF8.asc | apt-key add -
+        echo "deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/pub/repos/apt/ bionic-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+        apt-get -y update
+        apt-get -y install postgresql-12 postgresql-12-partman
+        echo "shared_preload_libraries = 'pg_partman_bgw'" >> /etc/postgresql/12/main/postgresql.conf
+        echo "pg_partman_bgw.interval = 60" >> /etc/postgresql/12/main/postgresql.conf
+        echo "pg_partman_bgw.dbname = 'test'" >> /etc/postgresql/12/main/postgresql.conf
+        systemctl restart postgresql
+        su -l postgres -c "createuser -L app_owner"
+        su -l postgres -c "createdb test"
+        su -l postgres -c "psql -d test <<EOF
+CREATE SCHEMA partman AUTHORIZATION app_owner;
+CREATE EXTENSION pg_partman SCHEMA partman;
+GRANT ALL ON partman.custom_time_partitions TO app_owner;
+GRANT ALL ON partman.part_config TO app_owner;
+GRANT ALL ON partman.part_config_sub TO app_owner;
+GRANT ALL ON partman.table_privs TO app_owner;
+\\dx
+EOF"
+
+        su -l postgres -c "psql -d test <<EOF
+\\set ON_ERROR_STOP true
+SET ROLE app_owner;
+
+CREATE TABLE orders (
+  order_id      VARCHAR(36) NOT NULL,
+  email         VARCHAR(40) NOT NULL,
+  created_at    TIMESTAMP NOT NULL,
+  PRIMARY KEY (order_id, created_at)
+) PARTITION BY RANGE (created_at);
+
+CREATE INDEX orders_created_at_idx ON orders (created_at);
+
+SELECT partman.create_parent(
+    'public.orders', 
+    'created_at', 
+    'native', 
+    'daily', 
+    p_premake := 2,
+    p_start_partition := '2020-09-01', 
+    p_debug := true
+);
+
+UPDATE partman.part_config 
+SET inherit_privileges = true
+WHERE parent_table='public.orders';
+
+-- Use a fake UUID generator here
+INSERT INTO orders (order_id, email, created_at)
+SELECT
+  md5(random()::text || clock_timestamp()::text)::uuid as order_id,
+  'order_' || seq || '@' || (
+    CASE (RANDOM() * 2)::INT
+      WHEN 0 THEN 'gmail'
+      WHEN 1 THEN 'hotmail'
+      WHEN 2 THEN 'yahoo'
+    END
+  ) || '.com' AS email,
+  timestamp '2020-09-01 00:00:00' +
+       random() * (now() - timestamp '2020-09-01 00:00:00')
+FROM GENERATE_SERIES(1, 3000000) seq;
+
+VACUUM ANALYZE orders;
+
+UPDATE partman.part_config 
+SET retention = '30 days', retention_keep_table = false
+WHERE parent_table='public.orders';
+
+SELECT partman.run_maintenance('public.orders');
+
+\\d
+
+UPDATE partman.part_config 
+SET premake = 7
+WHERE parent_table='public.orders';
+
+SELECT pg_sleep(90);
+
+\\d
+
+EOF"
+
+    SHELL
+end
