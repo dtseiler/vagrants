@@ -87,6 +87,8 @@ DROP INDEX orders_part_template_email_idx;
 -- Downtime would BEGIN here
 --
 
+BEGIN;
+
 ALTER TABLE orders RENAME TO orders_source; 
 
 ALTER INDEX orders_pkey rename to orders_default_pkey;
@@ -115,6 +117,8 @@ DROP TABLE orders_default;
 ALTER TABLE orders_source RENAME TO orders_default; 
 ALTER TABLE orders ATTACH PARTITION orders_default DEFAULT;
 UPDATE partman.part_config SET automatic_maintenance='on' WHERE parent_table='public.orders';
+
+COMMIT;
 
 --
 -- Downtime would END here
