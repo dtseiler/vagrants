@@ -95,17 +95,6 @@ SELECT partman.create_parent('public.user_aggregations', 'date', 'native', 'mont
     p_start_partition := '2018-07-01'
 );
 
-CREATE INDEX CONCURRENTLY user_aggregations_p2020_11_date_idx ON user_aggregations_p2020_11 (date DESC);
-CREATE INDEX CONCURRENTLY user_aggregations_p2020_11_foo_idx ON user_aggregations_p2020_11 (primary_international_id, date, user_id);
-CREATE INDEX CONCURRENTLY user_aggregations_p2020_12_date_idx ON user_aggregations_p2020_12 (date DESC);
-CREATE INDEX CONCURRENTLY user_aggregations_p2020_12_foo_idx ON user_aggregations_p2020_12 (primary_international_id, date, user_id);
-CREATE INDEX CONCURRENTLY user_aggregations_p2021_01_date_idx ON user_aggregations_p2021_01 (date DESC);
-CREATE INDEX CONCURRENTLY user_aggregations_p2021_01_foo_idx ON user_aggregations_p2021_01 (primary_international_id, date, user_id);
-CREATE INDEX CONCURRENTLY user_aggregations_p2021_02_date_idx ON user_aggregations_p2021_02 (date DESC);
-CREATE INDEX CONCURRENTLY user_aggregations_p2021_02_foo_idx ON user_aggregations_p2021_02 (primary_international_id, date, user_id);
-CREATE INDEX CONCURRENTLY user_aggregations_p2021_03_date_idx ON user_aggregations_p2021_03 (date DESC);
-CREATE INDEX CONCURRENTLY user_aggregations_p2021_03_foo_idx ON user_aggregations_p2021_03 (primary_international_id, date, user_id);
-
 -- Show size and row counts
 SELECT nspname || '.' || relname AS "relation",
     pg_size_pretty(pg_relation_size(C.oid)) AS "size"
@@ -134,6 +123,8 @@ VACUUM ANALYZE user_aggregations_old;
 REINDEX TABLE user_aggregations_old;
 
 -- Build indexes for previous 6 months partitions (assuming currently in Nov 2020)
+CREATE INDEX CONCURRENTLY user_aggregations_p2020_11_date_idx ON user_aggregations_p2020_11 (date DESC);
+CREATE INDEX CONCURRENTLY user_aggregations_p2020_11_foo_idx ON user_aggregations_p2020_11 (primary_international_id, date, user_id);
 CREATE INDEX CONCURRENTLY user_aggregations_p2020_10_date_idx ON user_aggregations_p2020_10 (date DESC);
 CREATE INDEX CONCURRENTLY user_aggregations_p2020_10_foo_idx ON user_aggregations_p2020_10 (primary_international_id, date, user_id);
 CREATE INDEX CONCURRENTLY user_aggregations_p2020_09_date_idx ON user_aggregations_p2020_09 (date DESC);
@@ -196,7 +187,7 @@ ORDER BY relname;
 EOF"
 
         # Create remaining partition indexes and the parent indexes
-        PART_TABLES=(`sudo -u postgres psql -AtX -d test -c "select relname from pg_stat_user_tables where relname like 'user_aggregations_p%' order by relname"`)
+        PART_TABLES=(`sudo -u postgres psql -AtX -d test -c "select relname from pg_stat_user_tables where relname like 'user_aggregations_p%' order by relname desc"`)
 
         for part_tab in "${PART_TABLES[@]}"
         do
