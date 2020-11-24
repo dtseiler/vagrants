@@ -32,14 +32,14 @@ EOF
         apt-get -y install postgresql-12
 
         # Build pgagroal
-        apt-get -y install cmake gcc-8 openssl libev-dev python3-docutils
+        apt-get -y install cmake gcc-8 openssl libssl-dev libev-dev libsystemd-dev python3-docutils
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-8 8
         update-alternatives --set gcc /usr/bin/gcc-8
 
-        curl -sSLO https://github.com/agroal/pgagroal/releases/download/0.7.0/pgagroal-0.7.0.tar.gz
-        tar -xzf pgagroal-0.7.0.tar.gz
-        mkdir pgagroal-0.7.0/build
-        cd pgagroal-0.7.0/build
+        curl -sSLO https://github.com/agroal/pgagroal/releases/download/1.0.0/pgagroal-1.0.0.tar.gz
+        tar -xzf pgagroal-1.0.0.tar.gz
+        mkdir pgagroal-1.0.0/build
+        cd pgagroal-1.0.0/build
         cmake -DCMAKE_INSTALL_PREFIX=/usr/local ..
         make
         make install
