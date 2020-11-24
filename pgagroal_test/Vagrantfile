@@ -32,6 +32,9 @@ EOF
         apt-get -y install postgresql-12
         sudo -u postgres psql -c "create user dts password 'test123';"
         sudo -u postgres psql -c "create database dts_test owner dts;"
+        echo '*:*:*:dts:test123' >> /home/vagrant/.pgpass
+        chown vagrant /home/vagrant/.pgpass
+        chmod 0600 /home/vagrant/.pgpass
 
         # Build pgagroal
         apt-get -y install cmake gcc-8 openssl libssl-dev libev-dev libsystemd-dev python3-docutils
@@ -58,6 +61,9 @@ EOF
         # Start pgagroal in daemon mode
         sudo -u postgres /usr/local/bin/pgagroal -d -c /usr/local/etc/pgagroal/pgagroal.conf -a /usr/local/etc/pgagroal/pgagroal_hba.conf
 
-        # TODO have example connections to dts@dts_test database
+        sudo -u vagrant psql -h localhost -p 2345 -U dts -d dts_test -c "select now();"
+        sudo -u vagrant psql -h localhost -p 2345 -U dts -d dts_test -c "create table dts_tables as select * from pg_tables;"
+        sudo -u vagrant psql -h localhost -p 2345 -U dts -d dts_test -c "select count(*) from dts_tables;"
+        sudo -u vagrant pgagroal-cli -c /usr/local/etc/pgagroal/pgagroal.conf status
     SHELL
 end
