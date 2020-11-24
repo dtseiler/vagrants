@@ -30,6 +30,8 @@ EOF
         echo "deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/pub/repos/apt/ bionic-pgdg main" > /etc/apt/sources.list.d/pgdg.list
         apt-get -y update
         apt-get -y install postgresql-12
+        sudo -u postgres psql -c "create user dts password 'test123';"
+        sudo -u postgres psql -c "create database dts_test owner dts;"
 
         # Build pgagroal
         apt-get -y install cmake gcc-8 openssl libssl-dev libev-dev libsystemd-dev python3-docutils
@@ -55,5 +57,7 @@ EOF
 
         # Start pgagroal in daemon mode
         sudo -u postgres /usr/local/bin/pgagroal -d -c /usr/local/etc/pgagroal/pgagroal.conf -a /usr/local/etc/pgagroal/pgagroal_hba.conf
+
+        # TODO have example connections to dts@dts_test database
     SHELL
 end
