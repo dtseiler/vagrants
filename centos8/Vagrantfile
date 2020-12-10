@@ -1,0 +1,33 @@
+# -*- mode: ruby -*-
+# # vi: set ft=ruby :
+
+# Specify minimum Vagrant version and Vagrant API version
+VAGRANTFILE_API_VERSION = "2"
+
+servers = [
+    {
+        :name => "centos8",
+        :mem => "1024"
+    }
+]
+
+# Create servers
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+    servers.each do |server|
+        config.vm.define server[:name] do |srv|
+            srv.vm.box = "bento/centos-8"
+            srv.vm.hostname = server[:name]
+
+            srv.vm.provider :virtualbox do |vb|
+                vb.name = server[:name]
+                vb.memory = server[:mem]
+                vb.gui = false
+            end
+
+            srv.vm.provision "shell", inline: <<-SHELL
+              systemctl stop firewalld
+              systemctl disable firewalld
+            SHELL
+        end
+    end
+end
