@@ -3,10 +3,12 @@
 
 # define hostname
 NAME = "pgagroal-test"
+PGAGROAL_VERSION = "1.0.0"
 
 Vagrant.configure("2") do |config|
     config.vm.define NAME
     config.vm.box = "bento/ubuntu-18.04"
+    #config.vm.box = "bento/ubuntu-20.04"
     config.vm.hostname = NAME
 
     config.vm.provision "shell", inline: <<-SHELL
@@ -41,10 +43,10 @@ EOF
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-8 8
         update-alternatives --set gcc /usr/bin/gcc-8
 
-        curl -sSLO https://github.com/agroal/pgagroal/releases/download/1.0.0/pgagroal-1.0.0.tar.gz
-        tar -xzf pgagroal-1.0.0.tar.gz
-        mkdir pgagroal-1.0.0/build
-        cd pgagroal-1.0.0/build
+        curl -sSLO https://github.com/agroal/pgagroal/releases/download/#{PGAGROAL_VERSION}/pgagroal-#{PGAGROAL_VERSION}.tar.gz
+        tar -xzf pgagroal-#{PGAGROAL_VERSION}.tar.gz
+        mkdir pgagroal-#{PGAGROAL_VERSION}/build
+        cd pgagroal-#{PGAGROAL_VERSION}/build
         cmake -DCMAKE_INSTALL_PREFIX=/usr/local ..
         make
         make install
