@@ -2,6 +2,7 @@
 # vi: set ft=ruby :
 
 pg_version = "12"
+password_cipher = %x(openssl rand -hex 12 | tr -d '\n')
 
 servers = [
     {
@@ -59,8 +60,7 @@ EOF
                 echo "wal_level = logical" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
 
                 su -l postgres -c "echo 'export PATH=/usr/lib/postgresql/#{pg_version}/bin:\$PATH' >> /var/lib/postgresql/.pgsql_profile"
-                su -l postgres -c "echo '*:*:*:replicator:replicator123' >> /var/lib/postgresql/.pgpass"
-                su -l postgres -c "echo '*:*:*:postgres:postgres@123!' >> /var/lib/postgresql/.pgpass"
+                su -l postgres -c "echo '*:*:*:replicator:#{password_cipher}' >> /var/lib/postgresql/.pgpass"
                 su -l postgres -c "chmod 0600 /var/lib/postgresql/.pgpass"
 
                 systemctl restart postgresql@#{pg_version}-main
@@ -68,7 +68,7 @@ EOF
                 if [ $(hostname) = 'postgres-lr1' ]
                 then
                     # Create superuser to do both replication connection and SELECT ALL from all source databases/schemas/tables
-                    su -l postgres -c "psql -c \\"create user replicator superuser password 'replicator123'\\""
+                    su -l postgres -c "psql -c \\"create user replicator superuser password '#{password_cipher}'\\""
                     echo "host    all             replicator      192.168.99.102/32         md5" >> /etc/postgresql/#{pg_version}/main/pg_hba.conf
                     su -l postgres -c "pg_ctlcluster reload 12 main"
                     su -l postgres -c "createdb testdb"
