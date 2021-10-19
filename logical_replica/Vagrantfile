@@ -57,26 +57,29 @@ EOF
                 echo "max_wal_senders = 10" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
                 echo "max_replication_slots = 10" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
                 echo "wal_level = logical" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
-                echo "host    all             replicator      192.168.99.0/24         md5" >> /etc/postgresql/#{pg_version}/main/pg_hba.conf
 
                 su -l postgres -c "echo 'export PATH=/usr/lib/postgresql/#{pg_version}/bin:\$PATH' >> /var/lib/postgresql/.pgsql_profile"
                 su -l postgres -c "echo '*:*:*:replicator:replicator123' >> /var/lib/postgresql/.pgpass"
                 su -l postgres -c "echo '*:*:*:postgres:postgres@123!' >> /var/lib/postgresql/.pgpass"
                 su -l postgres -c "chmod 0600 /var/lib/postgresql/.pgpass"
 
+                systemctl restart postgresql@#{pg_version}-main
+
                 if [ $(hostname) = 'postgres-lr1' ]
                 then
-                    su -l postgres -c "psql -c \\"create user replicator replication password 'replicator123'\\""
-                    systemctl restart postgresql@#{pg_version}-main
+                    # Create superuser to do both replication connection and SELECT ALL from all source databases/schemas/tables
+                    su -l postgres -c "psql -c \\"create user replicator superuser password 'replicator123'\\""
+                    echo "host    all             replicator      192.168.99.102/32         md5" >> /etc/postgresql/#{pg_version}/main/pg_hba.conf
+                    su -l postgres -c "pg_ctlcluster reload 12 main"
                     su -l postgres -c "createdb testdb"
                     su -l postgres -c "psql -d testdb -a -f /vagrant/gen_data.sql"
                     su -l postgres -c "pg_dump -d testdb -s -f /tmp/testdb_schema.sql"
-                    su -l postgres -c "psql -d testdb -c \\"CREATE PUBLICATION testdb_pub FOR ALL TABLES;\\""
                     mv /tmp/testdb_schema.sql /vagrant/testdb_schema.sql
+                    su -l postgres -c "psql -d testdb -c \\"CREATE PUBLICATION testdb_pub FOR ALL TABLES;\\""
 
                 else
                     su -l postgres -c "createdb testdb"
-                    su -l postgres -c "psql -d testdb < /vagrant/testdb_schema.sql"
+                    su -l postgres -c "psql -d testdb -a -f /vagrant/testdb_schema.sql"
                     su -l postgres -c "psql -d testdb -c \\"CREATE SUBSCRIPTION testdb_sub CONNECTION 'host=192.168.99.101 port=5432 user=replicator dbname=testdb' PUBLICATION testdb_pub;\\""
                 fi
             SHELL
