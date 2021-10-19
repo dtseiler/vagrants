@@ -71,7 +71,7 @@ EOF
                     # Create superuser to do both replication connection and SELECT ALL from all source databases/schemas/tables
                     su -l postgres -c "psql -c \\"create user replicator superuser password '#{password_cipher}'\\""
                     echo "host    all             replicator      192.168.99.102/32         md5" >> /etc/postgresql/#{server[:pg_version]}/main/pg_hba.conf
-                    su -l postgres -c "pg_ctlcluster reload 12 main"
+                    su -l postgres -c "pg_ctlcluster reload #{server[:pg_version]} main"
                     su -l postgres -c "createdb testdb"
                     su -l postgres -c "psql -d testdb -a -f /vagrant/gen_data.sql"
                     su -l postgres -c "pg_dump -d testdb -s -f /tmp/testdb_schema.sql"
