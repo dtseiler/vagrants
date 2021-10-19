@@ -1,19 +1,20 @@
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
 
-pg_version = "12"
 password_cipher = %x(openssl rand -hex 12 | tr -d '\n')
 
 servers = [
     {
         :name => "postgres-lr1",
         :ipaddr => "192.168.99.101",
-        :box => "bento/ubuntu-18.04"
+        :box => "bento/ubuntu-18.04",
+        :pg_version => 12
     },
     {
         :name => "postgres-lr2",
         :ipaddr => "192.168.99.102",
-        :box => "bento/ubuntu-20.04"
+        :box => "bento/ubuntu-20.04",
+        :pg_version => 14
     }
 ]
 
@@ -52,24 +53,24 @@ EOF
                 echo "deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
                 apt-get -y update
 
-                apt-get -y install postgresql-#{pg_version}
+                apt-get -y install postgresql-#{server[:pg_version]}
 
-                echo "listen_addresses = '*'" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
-                echo "max_wal_senders = 10" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
-                echo "max_replication_slots = 10" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
-                echo "wal_level = logical" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+                echo "listen_addresses = '*'" >> /etc/postgresql/#{server[:pg_version]}/main/postgresql.conf
+                echo "max_wal_senders = 10" >> /etc/postgresql/#{server[:pg_version]}/main/postgresql.conf
+                echo "max_replication_slots = 10" >> /etc/postgresql/#{server[:pg_version]}/main/postgresql.conf
+                echo "wal_level = logical" >> /etc/postgresql/#{server[:pg_version]}/main/postgresql.conf
 
-                su -l postgres -c "echo 'export PATH=/usr/lib/postgresql/#{pg_version}/bin:\$PATH' >> /var/lib/postgresql/.pgsql_profile"
+                su -l postgres -c "echo 'export PATH=/usr/lib/postgresql/#{server[:pg_version]}/bin:\$PATH' >> /var/lib/postgresql/.pgsql_profile"
                 su -l postgres -c "echo '*:*:*:replicator:#{password_cipher}' >> /var/lib/postgresql/.pgpass"
                 su -l postgres -c "chmod 0600 /var/lib/postgresql/.pgpass"
 
-                systemctl restart postgresql@#{pg_version}-main
+                systemctl restart postgresql@#{server[:pg_version]}-main
 
                 if [ $(hostname) = 'postgres-lr1' ]
                 then
                     # Create superuser to do both replication connection and SELECT ALL from all source databases/schemas/tables
                     su -l postgres -c "psql -c \\"create user replicator superuser password '#{password_cipher}'\\""
-                    echo "host    all             replicator      192.168.99.102/32         md5" >> /etc/postgresql/#{pg_version}/main/pg_hba.conf
+                    echo "host    all             replicator      192.168.99.102/32         md5" >> /etc/postgresql/#{server[:pg_version]}/main/pg_hba.conf
                     su -l postgres -c "pg_ctlcluster reload 12 main"
                     su -l postgres -c "createdb testdb"
                     su -l postgres -c "psql -d testdb -a -f /vagrant/gen_data.sql"
