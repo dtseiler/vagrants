@@ -25,7 +25,7 @@ deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ focal-se
 deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ focal-security multiverse
 EOF
         apt-get -y update
-        apt-get -y install curl ca-certificates
+        apt-get -y install curl ca-certificates gnupg
         curl -s #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/ACCC4CF8.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/apt.postgresql.org.gpg >/dev/null
         echo "deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/pub/repos/apt/ focal-pgdg main" > /etc/apt/sources.list.d/pgdg.list
         apt-get -y update
