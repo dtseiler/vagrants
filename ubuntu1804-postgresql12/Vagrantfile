@@ -25,8 +25,8 @@ deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-s
 deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security multiverse
 EOF
         apt-get -y update
-        apt-get -y install curl ca-certificates
-        curl -s #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/ACCC4CF8.asc | apt-key add -
+        apt -y install curl ca-certificates gnupg
+        curl -s #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/ACCC4CF8.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/apt.postgresql.org.gpg >/dev/null
         echo "deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/pub/repos/apt/ bionic-pgdg main" > /etc/apt/sources.list.d/pgdg.list
         apt-get -y update
         apt-get -y install postgresql-12
