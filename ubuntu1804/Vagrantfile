@@ -7,7 +7,6 @@ NAME = "ubuntu1804-base"
 Vagrant.configure("2") do |config|
     config.vm.define NAME
     config.vm.box = "bento/ubuntu-18.04"
-    #config.vm.box = "ubuntu/bionic64"
     config.vm.hostname = NAME
 
     config.vm.provision "shell", inline: <<-SHELL
@@ -25,6 +24,6 @@ deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-s
 deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security universe
 deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ bionic-security multiverse
 EOF
-        apt-get -y update
+        apt update
     SHELL
 end
