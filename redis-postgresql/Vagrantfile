@@ -9,12 +9,21 @@ Vagrant.configure("2") do |config|
       redis.vm.box = "bento/ubuntu-20.04"
       redis.vm.hostname = "redis"
       redis.vm.network :private_network, ip: "192.168.61.101"
-      redis.vm.provision "shell", inline: "apt-get -y install redis-server"
+      redis.vm.provision "shell", inline: <<-SHELL
+sudo add-apt-repository ppa:redislabs/redis
+apt -y update
+apt -y install redis-server
+
+# Don't need to do this with the redis 6.2 package from the redislabs ppa
+#sed -i 's/^supervised no/supervised systemd/g' /etc/redis/redis.conf
+#systemctl restart redis-server
+
+SHELL
     end
 
     config.vm.define "postgres" do |postgres|
       postgres.vm.hostname = "postgres"
       postgres.vm.network :private_network, ip: "192.168.61.102"
-      postgres.vm.provision "shell", inline: "apt-get -y install postgresql-12"
+      postgres.vm.provision "shell", inline: "apt -y install postgresql-12"
     end
 end
