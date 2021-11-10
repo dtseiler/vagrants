@@ -29,7 +29,7 @@ deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_re
 deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs)-security universe
 deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs)-security multiverse
 EOF
-            apt-get -y update
+            apt -y update
 
             # Set up PGDG apt repo
             apt -y install curl ca-certificates gnupg
@@ -42,6 +42,6 @@ EOF
             echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
         fi
 
-        apt-get -y update
+        apt -y update
     SHELL
 end
