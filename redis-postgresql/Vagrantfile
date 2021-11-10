@@ -1,0 +1,20 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# Load setup Vagrantfile
+load "../Vagrantfile.setup"
+
+Vagrant.configure("2") do |config|
+    config.vm.define "redis" do |redis|
+      redis.vm.box = "bento/ubuntu-20.04"
+      redis.vm.hostname = "redis"
+      redis.vm.network :private_network, ip: "192.168.61.101"
+      redis.vm.provision "shell", inline: "apt-get -y install redis-server"
+    end
+
+    config.vm.define "postgres" do |postgres|
+      postgres.vm.hostname = "postgres"
+      postgres.vm.network :private_network, ip: "192.168.61.102"
+      postgres.vm.provision "shell", inline: "apt-get -y install postgresql-12"
+    end
+end
