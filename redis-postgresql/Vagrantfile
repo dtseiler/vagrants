@@ -4,26 +4,66 @@
 # Load setup Vagrantfile
 load "../Vagrantfile.setup"
 
+redis_servers = [
+    {
+        :name => "redis01",
+        :ipaddr => "192.168.61.101",
+        :mem => "512"
+    },
+    {
+        :name => "redis02",
+        :ipaddr => "192.168.61.102",
+        :mem => "512"
+    },
+    {
+        :name => "redis03",
+        :ipaddr => "192.168.61.103",
+        :mem => "512"
+    }
+]
+
 Vagrant.configure("2") do |config|
-    config.vm.define "redis" do |redis|
-      redis.vm.box = "bento/ubuntu-20.04"
-      redis.vm.hostname = "redis"
-      redis.vm.network :private_network, ip: "192.168.61.101"
+  redis_servers.each do |server|
+    config.vm.define server[:name] do |redis|
+      #redis.vm.box = "bento/ubuntu-20.04"
+      redis.vm.hostname = server[:name]
+      redis.vm.network :private_network, ip: server[:ipaddr]
+      redis.vm.provider :virtualbox do |vb|
+        vb.name = server[:name]
+        vb.memory = server[:mem]
+      end
       redis.vm.provision "shell", inline: <<-SHELL
+export DEBIAN_FRONTEND=noninteractive
 sudo add-apt-repository ppa:redislabs/redis
 apt -y update
 apt -y install redis-server
 
-# Don't need to do this with the redis 6.2 package from the redislabs ppa
-#sed -i 's/^supervised no/supervised systemd/g' /etc/redis/redis.conf
-#systemctl restart redis-server
+# Change these default configs
+sed -i 's/^bind .*/bind 127.0.0.1 #{server[:ipaddr]}/' /etc/redis/redis.conf
+sed -i 's/^port .*/port 7000/' /etc/redis/redis.conf
+sed -i 's/protected-mode .*/protected-mode no/' /etc/redis/redis.conf
+sed -i 's/appendonly .*/appendonly yes/' /etc/redis/redis.conf
 
+# Add these configs
+echo "cluster-enabled yes" >> /etc/redis/redis.conf
+echo "cluster-config-file nodes.conf" >> /etc/redis/redis.conf
+echo "cluster-node-timeout 15000" >> /etc/redis/redis.conf
+
+systemctl restart redis-server
+
+# pseudo-logic to see if this is the last machine in the group
+if [[ "#{server[:name]}" = "#{redis_servers.last[:name]}" ]]; then
+  touch /tmp/THIS_IS_THE_LAST_SERVER
+  redis-cli --cluster create 192.168.61.101:7000 192.168.61.102:7000 192.168.61.103:7000 --cluster-yes
+fi
 SHELL
     end
+  end
 
-    config.vm.define "postgres" do |postgres|
-      postgres.vm.hostname = "postgres"
-      postgres.vm.network :private_network, ip: "192.168.61.102"
-      postgres.vm.provision "shell", inline: "apt -y install postgresql-12"
-    end
+  #config.vm.define "postgres" do |postgres|
+    #postgres.vm.hostname = "postgres"
+    #postgres.vm.network :private_network, ip: "192.168.61.111"
+    #postgres.vm.provision "shell", inline: "apt -y install postgresql-12"
+  #end
+
 end
