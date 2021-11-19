@@ -19,8 +19,29 @@ redis_servers = [
         :name => "redis03",
         :ipaddr => "192.168.61.103",
         :mem => "512"
+    },
+    {
+        :name => "redis04",
+        :ipaddr => "192.168.61.104",
+        :mem => "512"
+    },
+    {
+        :name => "redis05",
+        :ipaddr => "192.168.61.105",
+        :mem => "512"
+    },
+    {
+        :name => "redis06",
+        :ipaddr => "192.168.61.106",
+        :mem => "512"
     }
 ]
+
+# Build the ip_addr:port string for the Redis cluster creation command
+redis_cluster_string = ""
+redis_servers.each do |rs|
+  redis_cluster_string += " " + rs[:ipaddr] + ":7000"
+end
 
 Vagrant.configure("2") do |config|
   redis_servers.each do |server|
@@ -32,6 +53,7 @@ Vagrant.configure("2") do |config|
         vb.name = server[:name]
         vb.memory = server[:mem]
       end
+
       redis.vm.provision "shell", inline: <<-SHELL
 export DEBIAN_FRONTEND=noninteractive
 sudo add-apt-repository ppa:redislabs/redis
@@ -51,10 +73,11 @@ echo "cluster-node-timeout 15000" >> /etc/redis/redis.conf
 
 systemctl restart redis-server
 
-# pseudo-logic to see if this is the last machine in the group
+# If this is the last machine in the group, run the Redis cluster setup
 if [[ "#{server[:name]}" = "#{redis_servers.last[:name]}" ]]; then
-  touch /tmp/THIS_IS_THE_LAST_SERVER
-  redis-cli --cluster create 192.168.61.101:7000 192.168.61.102:7000 192.168.61.103:7000 --cluster-yes
+  echo "redis_cluster_string: #{redis_cluster_string}"
+  echo "redis-cli --cluster create #{redis_cluster_string} --cluster-yes --cluster-replicas 1"
+  redis-cli --cluster create #{redis_cluster_string} --cluster-yes --cluster-replicas 1
 fi
 SHELL
     end
