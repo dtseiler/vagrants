@@ -4,54 +4,25 @@
 # Load setup Vagrantfile
 load "../Vagrantfile.setup"
 
-redis_servers = [
-    {
-        :name => "redis01",
-        :ipaddr => "192.168.61.101",
-        :mem => "512"
-    },
-    {
-        :name => "redis02",
-        :ipaddr => "192.168.61.102",
-        :mem => "512"
-    },
-    {
-        :name => "redis03",
-        :ipaddr => "192.168.61.103",
-        :mem => "512"
-    },
-    {
-        :name => "redis04",
-        :ipaddr => "192.168.61.104",
-        :mem => "512"
-    },
-    {
-        :name => "redis05",
-        :ipaddr => "192.168.61.105",
-        :mem => "512"
-    },
-    {
-        :name => "redis06",
-        :ipaddr => "192.168.61.106",
-        :mem => "512"
-    }
-]
+redis_cluster_size = 6
 
 # Build the ip_addr:port string for the Redis cluster creation command
 redis_cluster_string = ""
-redis_servers.each do |rs|
-  redis_cluster_string += " " + rs[:ipaddr] + ":7000"
+(1..redis_cluster_size).each do |i|
+  redis_cluster_string += " 192.168.61.10#{i}:7000"
 end
 
 Vagrant.configure("2") do |config|
-  redis_servers.each do |server|
-    config.vm.define server[:name] do |redis|
+  (1..redis_cluster_size).each do |i|
+    vm_name = "redis0#{i}"
+    vm_ipaddr = "192.168.61.10#{i}"
+    config.vm.define vm_name do |redis|
       #redis.vm.box = "bento/ubuntu-20.04"
-      redis.vm.hostname = server[:name]
-      redis.vm.network :private_network, ip: server[:ipaddr]
+      redis.vm.hostname = "redis0#{i}"
+      redis.vm.network :private_network, ip: vm_ipaddr
       redis.vm.provider :virtualbox do |vb|
-        vb.name = server[:name]
-        vb.memory = server[:mem]
+        vb.name = vm_name
+        vb.memory = 512
       end
 
       redis.vm.provision "shell", inline: <<-SHELL
@@ -61,23 +32,42 @@ apt -y update
 apt -y install redis-server
 
 # Change these default configs
-sed -i 's/^bind .*/bind 127.0.0.1 #{server[:ipaddr]}/' /etc/redis/redis.conf
+sed -i 's/^bind .*/bind 127.0.0.1 #{vm_ipaddr}/' /etc/redis/redis.conf
 sed -i 's/^port .*/port 7000/' /etc/redis/redis.conf
 sed -i 's/protected-mode .*/protected-mode no/' /etc/redis/redis.conf
 sed -i 's/appendonly .*/appendonly yes/' /etc/redis/redis.conf
 
-# Add these configs
-echo "cluster-enabled yes" >> /etc/redis/redis.conf
-echo "cluster-config-file nodes.conf" >> /etc/redis/redis.conf
-echo "cluster-node-timeout 15000" >> /etc/redis/redis.conf
+if [[ "#{redis_cluster_size}" -gt "1" ]]; then
+  # Add these configs
+  echo "cluster-enabled yes" >> /etc/redis/redis.conf
+  echo "cluster-config-file nodes.conf" >> /etc/redis/redis.conf
+  echo "cluster-node-timeout 15000" >> /etc/redis/redis.conf
+fi
 
 systemctl restart redis-server
 
 # If this is the last machine in the group, run the Redis cluster setup
-if [[ "#{server[:name]}" = "#{redis_servers.last[:name]}" ]]; then
-  echo "redis_cluster_string: #{redis_cluster_string}"
-  echo "redis-cli --cluster create #{redis_cluster_string} --cluster-yes --cluster-replicas 1"
-  redis-cli --cluster create #{redis_cluster_string} --cluster-yes --cluster-replicas 1
+if [[ "#{redis_cluster_size}" -gt "1" ]]; then
+  if [[ "#{i}" = "#{redis_cluster_size}" ]]; then
+    CLUSTER_REPLICAS_CLAUSE=""
+    if [[ "#{redis_cluster_size}" -ge "3" ]]; then
+      # Clusters must be groups of 3
+      if [[ $(( #{redis_cluster_size} % 3 )) -eq 0 ]]; then
+        if [[ #{redis_cluster_size} -eq 3 ]]; then
+          echo "Cluster size is 3, not setting replicas."
+        else
+          CLUSTER_REPLICAS_CLAUSE="--cluster-replicas $((#{redis_cluster_size}/3 - 1))"
+          echo "Setting cluster replicas to $CLUSTER_REPLICAS_CLAUSE"
+        fi
+      else
+        echo "ERROR: Redis cluster size must be multiple of 3, not #{redis_cluster_size}"
+        exit 1
+      fi
+    fi
+    redis-cli --cluster create #{redis_cluster_string} --cluster-yes $CLUSTER_REPLICAS_CLAUSE
+  fi
+else
+  echo "Only 1 node specified, not configuring for cluster."
 fi
 SHELL
     end
