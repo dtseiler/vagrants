@@ -3,16 +3,19 @@
 
 password_cipher = %x(openssl rand -hex 12 | tr -d '\n')
 
+# Load setup Vagrantfile
+load "../Vagrantfile.setup"
+
 servers = [
     {
         :name => "postgres-lr1",
-        :ipaddr => "192.168.99.101",
+        :ipaddr => "192.168.60.101",
         :box => "bento/ubuntu-18.04",
-        :pg_version => 12
+        :pg_version => 14
     },
     {
         :name => "postgres-lr2",
-        :ipaddr => "192.168.99.102",
+        :ipaddr => "192.168.60.102",
         :box => "bento/ubuntu-20.04",
         :pg_version => 14
     }
@@ -33,25 +36,12 @@ Vagrant.configure("2") do |config|
             end
 
             srv.vm.provision "shell", inline: <<-SHELL
-                cat > /etc/apt/sources.list <<EOF
-deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs) main restricted
-deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs)-updates main restricted
-
-deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs) universe 
-deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs)-updates universe
-
-deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs) multiverse
-deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs)-updates multiverse
-
-deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs)-security main restricted
-deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs)-security universe
-deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs)-security multiverse
-EOF
-                apt-get -y update
-                apt-get -y install curl ca-certificates
-                curl -s #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/ACCC4CF8.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/apt.postgresql.org.gpg >/dev/null
-                echo "deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
-                apt-get -y update
+                apt-get -y install postgresql-common
+                if [ $(hostname) = 'postgres-lr2' ]
+                then
+                  # Enable data checksums on the replica
+                  echo "initdb_options = '--data-checksums'" >> /etc/postgresql-common/createcluster.conf
+                fi
 
                 apt-get -y install postgresql-#{server[:pg_version]}
 
@@ -70,7 +60,7 @@ EOF
                 then
                     # Create superuser to do both replication connection and SELECT ALL from all source databases/schemas/tables
                     su -l postgres -c "psql -c \\"create user replicator superuser password '#{password_cipher}'\\""
-                    echo "host    all             replicator      192.168.99.102/32         md5" >> /etc/postgresql/#{server[:pg_version]}/main/pg_hba.conf
+                    echo "host    all             replicator      192.168.60.102/32         md5" >> /etc/postgresql/#{server[:pg_version]}/main/pg_hba.conf
                     su -l postgres -c "pg_ctlcluster reload #{server[:pg_version]} main"
                     su -l postgres -c "createdb testdb"
                     su -l postgres -c "psql -d testdb -a -f /vagrant/gen_data.sql"
@@ -81,7 +71,7 @@ EOF
                 else
                     su -l postgres -c "createdb testdb"
                     su -l postgres -c "psql -d testdb -a -f /vagrant/testdb_schema.sql"
-                    su -l postgres -c "psql -d testdb -c \\"CREATE SUBSCRIPTION testdb_sub CONNECTION 'host=192.168.99.101 port=5432 user=replicator dbname=testdb' PUBLICATION testdb_pub;\\""
+                    su -l postgres -c "psql -d testdb -c \\"CREATE SUBSCRIPTION testdb_sub CONNECTION 'host=192.168.60.101 port=5432 user=replicator dbname=testdb' PUBLICATION testdb_pub;\\""
                 fi
             SHELL
         end
