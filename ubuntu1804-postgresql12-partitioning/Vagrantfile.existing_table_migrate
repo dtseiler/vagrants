@@ -91,7 +91,6 @@ ORDER BY relname;
 
 SELECT partman.create_parent('public.user_aggregations', 'date', 'native', 'monthly', 
     p_automatic_maintenance := 'on', 
-    p_debug := true, 
     p_start_partition := '2018-07-01'
 );
 
