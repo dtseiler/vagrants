@@ -65,8 +65,7 @@ SELECT partman.create_parent(
     'native', 
     'daily', 
     p_premake := 2,
-    p_start_partition := '2020-09-01', 
-    p_debug := true
+    p_start_partition := '2020-09-01'
 );
 
 UPDATE partman.part_config 
