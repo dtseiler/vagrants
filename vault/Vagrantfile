@@ -7,14 +7,25 @@ load "../Vagrantfile.setup"
 # define hostname
 NAME = "vault01"
 
+#$vault_run = <<VAULT_RUN
+#nohup /usr/bin/vault server -dev 0<&- &>/dev/null &
+#VAULT_RUN
+
 Vagrant.configure("2") do |config|
-    config.vm.define NAME
-    config.vm.hostname = NAME
-    config.vm.provision "shell", inline: <<-SHELL
+  config.vm.define NAME
+  config.vm.hostname = NAME
+  config.vm.provision "shell", inline: <<-SHELL
 export DEBIAN_FRONTEND=noninteractive
 curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
 apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
 apt -y update
 apt -y install vault
+export VAULT_ADDR='http://127.0.0.1:8200'
+echo "export VAULT_ADDR='http://127.0.0.1:8200'" >> /etc/profile.d/99-vault.sh
+nohup /usr/bin/vault server -dev 0<&- &>/dev/null &
+sleep 5
+vault status
 SHELL
+  #config.vm.provision "shell", inline: $vault_run, run: "always"
+  #config.vm.provision "shell", inline: "vault status", run: "always"
 end
