@@ -1,0 +1,40 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# Load setup Vagrantfile
+load "../Vagrantfile.setup"
+
+# define hostname
+NAME = "pg14-upgrade-test"
+
+Vagrant.configure("2") do |config|
+  config.vm.define NAME
+  config.vm.hostname = NAME
+  config.vm.provision "shell", inline: <<-SHELL
+    export DEBIAN_FRONTEND=noninteractive
+    apt -y install postgresql-common
+    echo "initdb_options = '--data-checksums'" >> /etc/postgresql-common/createcluster.conf
+    apt -y install postgresql-12 postgresql-12-partman
+
+    su -l postgres -c "createdb testdb"
+    su -l postgres -c "psql -d testdb -a -f /vagrant/gen_data.sql"
+
+    echo "create_main_cluster = 'false'" >> /etc/postgresql-common/createcluster.conf
+    apt -y install postgresql-14 postgresql-14-partman
+
+    # TEST
+    pg_createcluster 14 test
+    su -l postgres -c "/usr/lib/postgresql/14/bin/pg_upgrade --old-datadir=/var/lib/postgresql/12/main --new-datadir=/var/lib/postgresql/14/test --old-bindir=/usr/lib/postgresql/12/bin --new-bindir=/usr/lib/postgresql/14/bin --old-options '-c config_file=/etc/postgresql/12/main/postgresql.conf' --new-options '-c config_file=/etc/postgresql/14/test/postgresql.conf' --link --check"
+    pg_dropcluster 14 test
+
+    # UPGRADE
+    systemctl stop postgresql
+    sleep 10
+    pg_upgradecluster --method=link --no-start -v 14 12 main
+    systemctl daemon-reload
+    systemctl start postgresql
+
+    su -l postgres -c "/usr/lib/postgresql/14/bin/vacuumdb --all --analyze-only --jobs 2 --verbose"
+    su -l postgres -c "psql -c 'select version();'"
+SHELL
+end
