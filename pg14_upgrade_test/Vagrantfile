@@ -4,39 +4,161 @@
 # Load setup Vagrantfile
 load "../Vagrantfile.setup"
 
-# define hostname
-NAME = "pg14-upgrade-test"
+timestamp = Time.now()
+backrest_cipher = %x(openssl rand -base64 48)
+backrest_stanza = "postgres-foo"
+pg_version = "12"
+pg_upgrade_version = "14"
+
+servers = [
+    {
+        :name => "postgres-foo",
+        :ipaddr => "192.168.60.101",
+        :mem => "1024"
+    },
+    {
+        :name => "postgres-foo-standby",
+        :ipaddr => "192.168.60.102",
+        :mem => "1024"
+    }
+]
+
 
 Vagrant.configure("2") do |config|
-  config.vm.define NAME
-  config.vm.hostname = NAME
-  config.vm.provision "shell", inline: <<-SHELL
-    export DEBIAN_FRONTEND=noninteractive
-    apt -y install postgresql-common
-    mkdir -p /etc/postgresql-common/createcluster.d
-    echo "initdb_options = '--data-checksums'" >> /etc/postgresql-common/createcluster.d/initdb_options.conf
-    apt -y install postgresql-12 postgresql-12-partman
+  servers.each do |server|
+	config.vm.define server[:name] do |srv|
+	  srv.vm.box = "bento/ubuntu-18.04"
+	  srv.vm.network :private_network, ip: server[:ipaddr]
+	  srv.vm.hostname = server[:name]
 
-    su -l postgres -c "createdb testdb"
-    su -l postgres -c "psql -d testdb -a -f /vagrant/gen_data.sql"
+	  srv.vm.provider :virtualbox do |vb|
+		vb.name = server[:name]
+		vb.memory = server[:mem]
+		vb.gui = false
+	  end
 
-    echo "create_main_cluster = 'false'" >> /etc/postgresql-common/createcluster.d/pg14_upgrade.conf
-    apt -y install postgresql-14 postgresql-14-partman
+	  srv.vm.provision "shell", inline: <<-SHELL
+		export DEBIAN_FRONTEND=noninteractive
+		apt -y install postgresql-common
+		mkdir -p /etc/postgresql-common/createcluster.d
+		apt -y install postgresql-#{pg_version} postgresql-#{pg_version}-partman pgbackrest
+		echo "initdb_options = '--data-checksums'" >> /etc/postgresql-common/createcluster.d/initdb_options.conf
 
-    # TEST
-    pg_createcluster 14 test
-    su -l postgres -c "/usr/lib/postgresql/14/bin/pg_upgrade --old-datadir=/var/lib/postgresql/12/main --new-datadir=/var/lib/postgresql/14/test --old-bindir=/usr/lib/postgresql/12/bin --new-bindir=/usr/lib/postgresql/14/bin --old-options '-c config_file=/etc/postgresql/12/main/postgresql.conf' --new-options '-c config_file=/etc/postgresql/14/test/postgresql.conf' --link --check"
-    pg_dropcluster 14 test
+		#
+		# SSH Key Authentication (for pg_upgrade w/ rsync testing)
+		#
+		if [ -d /vagrant/keys -a -f /vagrant/keys/test_rsa ]
+		then
+		  su -l postgres -c "mkdir -p ~/.ssh; chmod 700 ~/.ssh"
+		  su -l postgres -c "cp /vagrant/keys/test_rsa ~/.ssh/id_rsa; chmod 600 ~/.ssh/id_rsa"
+		  su -l postgres -c "cp /vagrant/keys/test_rsa.pub ~/.ssh/id_rsa.pub; chmod 600 ~/.ssh/id_rsa.pub"
+		  su -l postgres -c "cp /vagrant/keys/test_rsa.pub ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys"
+		fi
+		echo "    StrictHostKeyChecking no" >> /etc/ssh/ssh_config
 
-    # UPGRADE
-    systemctl stop postgresql
-    sleep 10
-    pg_upgradecluster --method=link --no-start -v 14 12 main
-    systemctl daemon-reload
-    systemctl start postgresql
+		echo "cluster_name = '#{backrest_stanza}'" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+		echo "listen_addresses = '*'" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+		echo "max_wal_senders = 10" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+		echo "max_replication_slots = 10" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+		echo "wal_level = replica" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+		echo "hot_standby = on" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+		echo "archive_mode = on" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+		echo "archive_command = 'pgbackrest --stanza=#{backrest_stanza} archive-push %p'" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+		echo "max_replication_slots = 10" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+		echo "host         replication            replicator      192.168.60.0/24      md5" >> /etc/postgresql/#{pg_version}/main/pg_hba.conf
 
-    su -l postgres -c "/usr/lib/postgresql/14/bin/vacuumdb --all --analyze-only --jobs 2 --verbose"
-    su -l postgres -c "psql -c 'select version();'"
-    rm /etc/postgresql-common/createcluster.d/pg14_upgrade.conf
+		su -l postgres -c "echo 'export PATH=/usr/lib/postgresql/#{pg_version}/bin:\$PATH' >> /var/lib/postgresql/.pgsql_profile"
+		su -l postgres -c "echo '*:*:replication:replicator:replicator123' >> /var/lib/postgresql/.pgpass"
+		su -l postgres -c "echo '*:*:*:postgres:postgres@123!' >> /var/lib/postgresql/.pgpass"
+		su -l postgres -c "chmod 0600 /var/lib/postgresql/.pgpass"
+
+		cat > /etc/pgbackrest.conf <<EOF
+[global]
+log-level-console=info
+compress-type=lz4
+repo1-cipher-pass=#{backrest_cipher}
+repo1-cipher-type=aes-256-cbc
+repo1-type=azure
+repo1-azure-account=#{ENV['AZURE_STORAGE_ACCOUNT']}
+repo1-azure-key=#{ENV['AZURE_STORAGE_ACCESS_KEY']}
+repo1-azure-container=#{ENV['AZURE_STORAGE_CONTAINER']}
+repo1-path=/pgbackrest-dts-test/test-#{timestamp.strftime('%Y%m%d%H%M%S')}
+repo1-retention-full=2
+process-max=2
+
+[#{backrest_stanza}]
+pg1-path=/var/lib/postgresql/#{pg_version}/main
+pg1-port=5432
+EOF
+
+		if [ $(hostname) = 'postgres-foo' ]
+		then
+          su -l postgres -c "createdb testdb"
+          su -l postgres -c "psql -d testdb -a -f /vagrant/gen_data.sql"
+
+		  su -l postgres -c "psql -c \\"create user replicator replication password 'replicator123'\\""
+		  systemctl restart postgresql@#{pg_version}-main
+		  su -l postgres -c "psql -c \\"select pg_create_physical_replication_slot('starsky');\\""
+		  su -l postgres -c "pgbackrest --stanza=#{backrest_stanza} --log-level-console=info stanza-create"
+		  su -l postgres -c "pgbackrest --stanza=#{backrest_stanza} --log-level-console=info check"
+		  su -l postgres -c "pgbackrest --stanza=#{backrest_stanza} --log-level-console=info backup"
+		  cat >> /etc/pgbackrest.conf <<EOF
+pg2-host=192.168.60.102
+pg2-port=5432
+pg2-path=/var/lib/postgresql/#{pg_version}/main
+recovery-option=primary_conninfo=host=192.168.60.102 user=replicator
+recovery-option=recovery_target_timeline=latest
+recovery-option=primary_slot_name=hutch
+backup-standby=y
+EOF
+		else
+		  systemctl stop postgresql@#{pg_version}-main
+		  cat >> /etc/pgbackrest.conf <<EOF
+pg2-host=192.168.60.101
+pg2-port=5432
+pg2-path=/var/lib/postgresql/#{pg_version}/main
+recovery-option=primary_conninfo=host=192.168.60.101 user=replicator
+recovery-option=recovery_target_timeline=latest
+recovery-option=primary_slot_name=starsky
+backup-standby=y
+EOF
+		  rm -rf /var/lib/postgresql/#{pg_version}/main
+		  su -l postgres -c "mkdir /var/lib/postgresql/#{pg_version}/main && chmod 700 /var/lib/postgresql/#{pg_version}/main"
+		  su -l postgres -c "pgbackrest --stanza=#{backrest_stanza} --log-level-console=info --type=standby restore"
+
+		  systemctl start postgresql@#{pg_version}-main
+		fi
+
+		echo "create_main_cluster = 'false'" >> /etc/postgresql-common/createcluster.d/pg#{pg_upgrade_version}_upgrade.conf
+		apt -y install postgresql-#{pg_upgrade_version} postgresql-#{pg_upgrade_version}-partman
+
+		if [ $(hostname) = 'postgres-foo' ]
+		then
+          # TEST
+          pg_createcluster #{pg_upgrade_version} test
+          su -l postgres -c "/usr/lib/postgresql/#{pg_upgrade_version}/bin/pg_checksums -d -D /var/lib/postgresql/#{pg_upgrade_version}/test"
+          su -l postgres -c "/usr/lib/postgresql/#{pg_upgrade_version}/bin/pg_upgrade --old-datadir=/var/lib/postgresql/#{pg_version}/main --new-datadir=/var/lib/postgresql/#{pg_upgrade_version}/test --old-bindir=/usr/lib/postgresql/#{pg_version}/bin --new-bindir=/usr/lib/postgresql/#{pg_upgrade_version}/bin --old-options '-c config_file=/etc/postgresql/#{pg_version}/main/postgresql.conf' --new-options '-c config_file=/etc/postgresql/#{pg_upgrade_version}/test/postgresql.conf' --link --check"
+          pg_dropcluster #{pg_upgrade_version} test
+        fi
+
+		exit
+
+		###
+		###
+		###
+
+		# UPGRADE
+		systemctl stop postgresql
+		sleep 10
+		pg_upgradecluster --method=link --no-start -v #{pg_upgrade_version} #{pg_version} main
+		systemctl daemon-reload
+		systemctl start postgresql
+
+		su -l postgres -c "/usr/lib/postgresql/#{pg_upgrade_version}/bin/vacuumdb --all --analyze-only --jobs 2 --verbose"
+		su -l postgres -c "psql -c 'select version();'"
+		su -l postgres -c "psql -c 'show data_checksums;'"
+		rm /etc/postgresql-common/createcluster.d/pg#{pg_upgrade_version}_upgrade.conf
 SHELL
+    end
+  end
 end
