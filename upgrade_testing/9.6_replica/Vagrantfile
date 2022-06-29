@@ -67,8 +67,8 @@ EOF
                     systemctl start postgresql@9.6-main
 
                     su -l postgres -c "psql <<EOF
-CREATE EXTENSION pgcrypto;
-CREATE EXTENSION pgstattuple;
+--CREATE EXTENSION pgcrypto;
+--CREATE EXTENSION pgstattuple;
 
 alter user postgres password 'postgres@123!';
 
@@ -80,7 +80,8 @@ create database test lc_ctype='en_US' lc_collate='en_US' encoding='LATIN1' templ
 update pg_database set encoding = pg_char_to_encoding('UTF8') where datname = 'test';
 EOF"
                     su -l postgres -c "psql -l"
-                    su -l postgres -c "psql -d test -c \\"create extension pg_partman\\""
+                    su -l postgres -c "psql -d test -c \\"create schema partman\\""
+                    su -l postgres -c "psql -d test -c \\"create extension pg_partman schema partman\\""
                     su -l postgres -c "psql -d test <<EOF
 CREATE TABLE users (
   id    SERIAL PRIMARY KEY,
@@ -125,8 +126,6 @@ EOF"
                 rm wal-g.linux-amd64.tar.gz
 
                 mkdir -p /etc/wal-g/environment
-                chmod 0755 /etc/wal-g
-                chmod 0755 /etc/wal-g/environment
                 
                 #
                 # WAL-G Scripts
@@ -142,10 +141,14 @@ EOF"
                 echo "#{ENV['AWS_SECRET_ACCESS_KEY']}" > $ENVDIR/AWS_SECRET_ACCESS_KEY
                 echo "#{ENV['AWS_DEFAULT_REGION']}" > $ENVDIR/AWS_DEFAULT_REGION
                 #echo "#{ENV['WALG_STAGING_GPG_KEY_ID']}" > $ENVDIR/WALE_GPG_KEY_ID
-                echo "#{ENV['WALG_S3_PREFIX']}/replica_upgrade_testing/9.6" > $ENVDIR/WALG_S3_PREFIX
+                echo "#{ENV['WALG_S3_PREFIX']}/replica_upgrade_testing/9.6" > $ENVDIR/WALE_S3_PREFIX
                 chown -R postgres:postgres $ENVDIR
+                chmod -R 0755 /etc/wal-g
 
                 # Configure PostgreSQL WAL archiving
+                echo "logging_collector = 'on'" >> /etc/postgresql/9.6/main/postgresql.conf
+                echo "log_directory = '/var/log/postgresql'" >> /etc/postgresql/9.6/main/postgresql.conf
+                echo "log_filename = 'postgresql-current.log'" >> /etc/postgresql/9.6/main/postgresql.conf
                 echo "wal_level = replica" >> /etc/postgresql/9.6/main/postgresql.conf
                 echo "archive_mode = on" >> /etc/postgresql/9.6/main/postgresql.conf
                 echo "archive_command = 'envdir /etc/wal-g/environment /usr/local/bin/wal-g wal-push %p'" >> /etc/postgresql/9.6/main/postgresql.conf
@@ -177,6 +180,7 @@ EOF"
                     echo "standby_mode = on" >> /var/lib/postgresql/9.6/main/recovery.conf
                     echo "primary_conninfo = 'host=192.168.3.101 user=replicator'" >> /var/lib/postgresql/9.6/main/recovery.conf
                     echo "restore_command = 'envdir /etc/wal-g/environment /usr/local/bin/wal-g wal-fetch %f %p'" >> /var/lib/postgresql/9.6/main/recovery.conf
+                    echo "recovery_target_timeline = 'latest'" >> /var/lib/postgresql/9.6/main/recovery.conf
                     if [ $(hostname) = 'pg96-replica1' ]
                     then
                         echo "primary_slot_name = 'replica1'" >> /var/lib/postgresql/9.6/main/recovery.conf
@@ -195,9 +199,8 @@ EOF"
                 #
                 # Install PG 12
                 #
-
                 echo "create_main_cluster = false" >> /etc/postgresql-common/createcluster.conf
-                apt-get -y install postgresql-12
+                apt-get -y install postgresql-12 postgresql-12-partman
             SHELL
         end
     end

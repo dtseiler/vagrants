@@ -108,7 +108,7 @@ EOF"
         echo "#{ENV['AWS_SECRET_ACCESS_KEY']}" > $ENVDIR/AWS_SECRET_ACCESS_KEY
         echo "#{ENV['AWS_DEFAULT_REGION']}" > $ENVDIR/AWS_DEFAULT_REGION
         #echo "#{ENV['WALG_STAGING_GPG_KEY_ID']}" > $ENVDIR/WALE_GPG_KEY_ID
-        echo "#{ENV['WALG_S3_PREFIX']}/upgrade_testing/9.6" > $ENVDIR/WALG_S3_PREFIX
+        echo "#{ENV['WALG_S3_PREFIX']}/upgrade_testing-$(date '+%Y%m%d%H%M%S')/9.6" > $ENVDIR/WALG_S3_PREFIX
         chown -R postgres:postgres $ENVDIR
 
         # Configure PostgreSQL WAL archiving
@@ -121,7 +121,7 @@ EOF"
         # Install PG 12
         #
         echo "create_main_cluster = false" >> /etc/postgresql-common/createcluster.conf
-        apt-get -y install postgresql-12
+        #apt-get -y install postgresql-12
 
     SHELL
 end

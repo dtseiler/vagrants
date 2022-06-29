@@ -1,29 +1,15 @@
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
 
+# Load setup Vagrantfile
+load "../Vagrantfile.setup.Ubuntu-20.04"
+
 # define hostname
-NAME = "ubuntu2004-base"
+NAME = "ubuntu2004"
 
 Vagrant.configure("2") do |config|
     config.vm.define NAME
-    config.vm.box = "bento/ubuntu-20.04"
     config.vm.hostname = NAME
-
-    config.vm.provision "shell", inline: <<-SHELL
-        cat > /etc/apt/sources.list <<EOF
-deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ focal main restricted
-deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ focal-updates main restricted
-
-deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ focal universe
-deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ focal-updates universe
-
-deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ focal multiverse
-deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ focal-updates multiverse
-
-deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ focal-security main restricted
-deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ focal-security universe
-deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ focal-security multiverse
-EOF
-        apt-get -y update
-    SHELL
+    config.vm.provision "shell", inline: "apt update"
 end
+

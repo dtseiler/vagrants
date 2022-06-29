@@ -42,7 +42,7 @@ Vagrant.configure("2") do |config|
 		apt -y install postgresql-common
 		mkdir -p /etc/postgresql-common/createcluster.d
 		apt -y install postgresql-#{pg_version} postgresql-#{pg_version}-partman pgbackrest
-		echo "initdb_options = '--data-checksums'" >> /etc/postgresql-common/createcluster.d/initdb_options.conf
+		echo "initdb_options = '--data-checksums'" >> /etc/postgresql-common/createcluster.conf
 
 		#
 		# SSH Key Authentication (for pg_upgrade w/ rsync testing)
@@ -56,6 +56,8 @@ Vagrant.configure("2") do |config|
 		fi
 		echo "    StrictHostKeyChecking no" >> /etc/ssh/ssh_config
 
+        echo "shared_preload_libraries = 'pg_partman_bgw'" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
+        echo "pg_partman_bgw.dbname = 'testdb'" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
 		echo "cluster_name = '#{backrest_stanza}'" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
 		echo "listen_addresses = '*'" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
 		echo "max_wal_senders = 10" >> /etc/postgresql/#{pg_version}/main/postgresql.conf
@@ -94,11 +96,13 @@ EOF
 		if [ $(hostname) = 'postgres-foo' ]
 		then
           su -l postgres -c "createdb testdb"
+          su -l postgres -c "psql -d testdb -c \\"create schema partman\\""
+          su -l postgres -c "psql -d testdb -c \\"create extension pg_partman schema partman\\""
           su -l postgres -c "psql -d testdb -a -f /vagrant/gen_data.sql"
 
 		  su -l postgres -c "psql -c \\"create user replicator replication password 'replicator123'\\""
 		  systemctl restart postgresql@#{pg_version}-main
-		  su -l postgres -c "psql -c \\"select pg_create_physical_replication_slot('starsky');\\""
+		  su -l postgres -c "psql -c \\"select pg_create_physical_replication_slot('replica');\\""
 		  su -l postgres -c "pgbackrest --stanza=#{backrest_stanza} --log-level-console=info stanza-create"
 		  su -l postgres -c "pgbackrest --stanza=#{backrest_stanza} --log-level-console=info check"
 		  su -l postgres -c "pgbackrest --stanza=#{backrest_stanza} --log-level-console=info backup"
@@ -108,7 +112,7 @@ pg2-port=5432
 pg2-path=/var/lib/postgresql/#{pg_version}/main
 recovery-option=primary_conninfo=host=192.168.60.102 user=replicator
 recovery-option=recovery_target_timeline=latest
-recovery-option=primary_slot_name=hutch
+recovery-option=primary_slot_name=replica
 backup-standby=y
 EOF
 		else
@@ -119,7 +123,7 @@ pg2-port=5432
 pg2-path=/var/lib/postgresql/#{pg_version}/main
 recovery-option=primary_conninfo=host=192.168.60.101 user=replicator
 recovery-option=recovery_target_timeline=latest
-recovery-option=primary_slot_name=starsky
+recovery-option=primary_slot_name=replica
 backup-standby=y
 EOF
 		  rm -rf /var/lib/postgresql/#{pg_version}/main
@@ -141,23 +145,7 @@ EOF
           pg_dropcluster #{pg_upgrade_version} test
         fi
 
-		exit
-
-		###
-		###
-		###
-
-		# UPGRADE
-		systemctl stop postgresql
-		sleep 10
-		pg_upgradecluster --method=link --no-start -v #{pg_upgrade_version} #{pg_version} main
-		systemctl daemon-reload
-		systemctl start postgresql
-
-		su -l postgres -c "/usr/lib/postgresql/#{pg_upgrade_version}/bin/vacuumdb --all --analyze-only --jobs 2 --verbose"
-		su -l postgres -c "psql -c 'select version();'"
-		su -l postgres -c "psql -c 'show data_checksums;'"
-		rm /etc/postgresql-common/createcluster.d/pg#{pg_upgrade_version}_upgrade.conf
+        echo "Primary/Standby databases ready for upgrade."
 SHELL
     end
   end

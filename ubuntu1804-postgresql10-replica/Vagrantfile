@@ -76,11 +76,14 @@ EOF
                 #
                 if [ -d /vagrant/keys -a -f /vagrant/keys/test_rsa ]
                 then
-                    su -l postgres -c "mkdir ~/.ssh; chmod 700 ~/.ssh"
+                    su -l postgres -c "mkdir -p ~/.ssh; chmod 700 ~/.ssh"
                     su -l postgres -c "cp /vagrant/keys/test_rsa ~/.ssh/id_rsa; chmod 600 ~/.ssh/id_rsa"
                     su -l postgres -c "cp /vagrant/keys/test_rsa.pub ~/.ssh/id_rsa.pub; chmod 600 ~/.ssh/id_rsa.pub"
-                    su -l postgres -c "cp /vagrant/keys/test_rsa.pub ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys"
                 fi
+
+                # XXX
+                su -l vagrant -c "mkdir -p ~/.ssh; chmod 700 ~/.ssh"
+                su -l vagrant -c "cat /vagrant/id_rsa.pub >> ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys"
                 
                 #
                 # WAL-G Setup
@@ -106,11 +109,12 @@ EOF
                 echo "#{ENV['AWS_SECRET_ACCESS_KEY']}" > $ENVDIR/AWS_SECRET_ACCESS_KEY
                 echo "#{ENV['AWS_DEFAULT_REGION']}" > $ENVDIR/AWS_DEFAULT_REGION
                 echo "#{ENV['WALG_S3_PREFIX']}/pg10_replica-#{timestamp.strftime('%Y%m%d%H%M%S')}" > $ENVDIR/WALG_S3_PREFIX
+                echo "6" >> $ENVDIR/WALG_DELTA_MAX_STEPS
                 chown -R postgres:postgres $ENVDIR
                 
                 # Configure PostgreSQL WAL archiving
-                echo "wal_level = replica" >> /etc/postgresql/10/main/conf.d/wal-g.conf
                 echo "archive_mode = on" >> /etc/postgresql/10/main/conf.d/wal-g.conf
+                echo "wal_level = replica" >> /etc/postgresql/10/main/conf.d/wal-g.conf
                 echo "archive_command = 'envdir /etc/wal-g/environment /usr/local/bin/wal-g wal-push %p'" >> /etc/postgresql/10/main/conf.d/wal-g.conf
                 echo "max_wal_senders = 10" >> /etc/postgresql/10/main/conf.d/replication.conf
                 echo "listen_addresses = '*'" >> /etc/postgresql/10/main/conf.d/replication.conf
@@ -130,30 +134,38 @@ EOF
                     systemctl restart postgresql@10-main
 
                     su -l postgres -c "psql -c \\"create user replicator replication password 'replicator123'\\""
-                    su -l postgres -c "psql -c \\"select * from pg_create_physical_replication_slot('replica1')\\""
-                    su -l postgres -c "psql -c \\"select * from pg_create_physical_replication_slot('replica2')\\""
+                    #su -l postgres -c "psql -c \\"select * from pg_create_physical_replication_slot('replica1')\\""
 
+                    su -l postgres -c "envdir /etc/wal-g/environment /usr/local/bin/wal-g backup-push /var/lib/postgresql/10/main"
+                    su -l postgres -c "psql -c \\"create table dts_tables2 as select * from pg_tables\\""
                     su -l postgres -c "envdir /etc/wal-g/environment /usr/local/bin/wal-g backup-push /var/lib/postgresql/10/main"
                 else
                     systemctl stop postgresql@10-main
                     su -l postgres -c "rm -rf /var/lib/postgresql/10/main"
                     su -l postgres -c "envdir /etc/wal-g/environment /usr/local/bin/wal-g backup-fetch /var/lib/postgresql/10/main LATEST"
                     echo "standby_mode = on" >> /var/lib/postgresql/10/main/recovery.conf
-                    echo "primary_conninfo = 'host=192.168.96.101 user=replicator'" >> /var/lib/postgresql/10/main/recovery.conf
                     echo "restore_command = 'envdir /etc/wal-g/environment /usr/local/bin/wal-g wal-fetch %f %p'" >> /var/lib/postgresql/10/main/recovery.conf
                     if [ $(hostname) = 'pg10-replica1' ]
                     then
-                        echo "primary_slot_name = 'replica1'" >> /var/lib/postgresql/10/main/recovery.conf
+                        echo "No streaming replication from A to B"
+                        #echo "primary_slot_name = 'replica1'" >> /var/lib/postgresql/10/main/recovery.conf
+                        #echo "primary_conninfo = 'host=192.168.96.101 user=replicator'" >> /var/lib/postgresql/10/main/recovery.conf
                     elif [ $(hostname) = 'pg10-replica2' ]
                     then
                         echo "primary_slot_name = 'replica2'" >> /var/lib/postgresql/10/main/recovery.conf
-                        echo "archive_mode = off" >> /etc/postgresql/10/main/conf.d/wal-g.conf
+                        echo "primary_conninfo = 'host=192.168.96.102 user=replicator'" >> /var/lib/postgresql/10/main/recovery.conf
                     fi
+                    echo "recovery_target_timeline = 'latest'" >> /var/lib/postgresql/10/main/recovery.conf
                     chown postgres:postgres /var/lib/postgresql/10/main/recovery.conf
 
                     systemctl enable postgresql@10-main
                     systemctl start postgresql@10-main
                     su -l postgres -c "psql -c \\"select pg_is_in_recovery()\\""
+                    if [ $(hostname) = 'pg10-replica1' ]
+                    then
+                        echo "Skipping streaming replication"
+                        su -l postgres -c "psql -c \\"select * from pg_create_physical_replication_slot('replica2')\\""
+                    fi
                 fi
 
             SHELL

@@ -7,7 +7,6 @@ NAME = "ubuntu1804-pg96"
 Vagrant.configure("2") do |config|
     config.vm.define NAME
     config.vm.box = "bento/ubuntu-18.04"
-    #config.vm.box = "ubuntu/bionic64"
     config.vm.hostname = NAME
 
     config.vm.provision "shell", inline: <<-SHELL
@@ -30,6 +29,6 @@ EOF
         curl -s #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/ACCC4CF8.asc | apt-key add -
         echo "deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/pub/repos/apt/ bionic-pgdg main" > /etc/apt/sources.list.d/pgdg.list
         apt-get -y update
-        apt-get -y install postgresql-9.6
+        apt-get -y install postgresql-9.6 pgbackrest
     SHELL
 end

@@ -7,20 +7,20 @@ VAGRANTFILE_API_VERSION = "2"
 servers = [
     {
         :name => "pg12-primary",
-        :ipaddr => "192.168.3.101",
+        :ipaddr => "192.168.12.111",
         :mem => "1024"
     },
     {
         :name => "pg12-replica",
-        :ipaddr => "192.168.3.102",
+        :ipaddr => "192.168.12.112",
         :mem => "1024"
     }
 ]
 
 # Create servers
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
-    config.hostmanager.enabled = false
-    config.vbguest.auto_update = false
+    #config.hostmanager.enabled = false
+    #config.vbguest.auto_update = false
 
     servers.each do |server|
         config.vm.define server[:name] do |srv|
@@ -55,14 +55,14 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
                 su -l postgres -c "/usr/pgsql-12/bin/initdb -D /var/lib/pgsql/12/data"
                 echo "listen_addresses = '*'" >> /var/lib/pgsql/12/data/postgresql.conf
                 echo "wal_level = 'replica'" >> /var/lib/pgsql/12/data/postgresql.conf
-                echo "host         replication            replicator      192.168.3.0/24      md5" >> /var/lib/pgsql/12/data/pg_hba.conf
+                echo "host         replication            replicator      192.168.12.0/24      md5" >> /var/lib/pgsql/12/data/pg_hba.conf
 
                 systemctl enable postgresql-12
                 systemctl start postgresql-12
 
                 su -l postgres -c "psql -c \\"create user replicator replication password 'replicator123'\\""
               else
-                su -l postgres -c "pg_basebackup -h 192.168.3.101 -U replicator -D /var/lib/pgsql/12/data -R"
+                su -l postgres -c "pg_basebackup -h 192.168.12.111 -U replicator -D /var/lib/pgsql/12/data -R"
 
                 systemctl enable postgresql-12
                 systemctl start postgresql-12

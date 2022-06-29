@@ -5,9 +5,9 @@
 load "../Vagrantfile"
 
 # define hostname
-NAME = "ubuntu2204-pg12"
+NAME = "ubuntu2204-pg14"
 
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
-  config.vm.provision "shell", inline: "DEBIAN_FRONTEND=noninteractive apt-get -y install postgresql-12 postgresql-12-partman"
+  config.vm.provision "shell", inline: "DEBIAN_FRONTEND=noninteractive apt-get -y install postgresql-14 postgresql-14-partman"
 end
 

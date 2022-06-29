@@ -8,7 +8,13 @@ load "../Vagrantfile.setup"
 NAME = "ubuntu1804-pg14"
 
 Vagrant.configure("2") do |config|
-    config.vm.define NAME
-    config.vm.hostname = NAME
-    config.vm.provision "shell", inline: "apt-get -y install postgresql-14"
+  config.vm.define NAME
+  config.vm.hostname = NAME
+  #config.vm.provision "shell", inline: "apt-get -y install postgresql-14"
+  config.vm.provision "shell", inline: <<-SHELL
+    export DEBIAN_FRONTEND=noninteractive
+    apt -y install postgresql-common
+    echo "initdb_options = '--data-checksums'" >> /etc/postgresql-common/createcluster.conf
+    apt -y install postgresql-14
+SHELL
 end

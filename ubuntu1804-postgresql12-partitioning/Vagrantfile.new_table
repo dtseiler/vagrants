@@ -51,8 +51,9 @@ CREATE TABLE orders
   (LIKE orders_part_template INCLUDING DEFAULTS INCLUDING CONSTRAINTS)
 PARTITION BY RANGE (created_at);
 
---SELECT partman.create_parent('public.orders', 'created_at', 'native', 'daily', p_premake := 2, p_automatic_maintenance := 'on', p_template_table := 'public.orders_part_template', p_start_partition := '2020-07-01');
-SELECT partman.create_parent('public.orders', 'created_at', 'native', 'monthly', p_premake := 2, p_automatic_maintenance := 'on', p_template_table := 'public.orders_part_template', p_start_partition := '2020-07-01');
+--SELECT partman.create_parent('public.orders', 'created_at', 'native', 'daily', p_premake := 2, p_automatic_maintenance := 'on', p_template_table := 'public.orders_part_template', p_start_partition := '2021-07-01');
+--SELECT partman.create_parent('public.orders', 'created_at', 'native', 'monthly', p_premake := 2, p_automatic_maintenance := 'off', p_template_table := 'public.orders_part_template', p_start_partition := '2021-07-01');
+SELECT partman.create_parent('public.orders', 'created_at', 'native', 'quarterly', p_premake := 2, p_automatic_maintenance := 'off', p_template_table := 'public.orders_part_template', p_start_partition := '2021-07-01');
 
 -- Use a fake UUID generator here
 INSERT INTO orders (order_id, email, created_at)
@@ -65,8 +66,8 @@ SELECT
       WHEN 2 THEN 'yahoo'
     END
   ) || '.com' AS email,
-  timestamp '2018-07-01 00:00:00' +
-       random() * (now() - timestamp '2020-07-01 00:00:00')
+  timestamp '2021-07-01 00:00:00' +
+       random() * (now() - timestamp '2021-07-01 00:00:00')
 FROM GENERATE_SERIES(1, 5000000) seq;
 
 VACUUM ANALYZE orders;
@@ -80,7 +81,7 @@ UPDATE partman.part_config
 SET retention = '60 days', retention_keep_table = false 
 WHERE parent_table='public.orders';
 
-SELECT partman.run_maintenance('public.orders');
+--SELECT partman.run_maintenance('public.orders');
 
 SELECT relname, n_live_tup
 FROM pg_stat_all_tables
