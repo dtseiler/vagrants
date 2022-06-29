@@ -1,0 +1,13 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# Load setup Vagrantfile
+load "../Vagrantfile"
+
+# define hostname
+NAME = "ubuntu2204-pg12"
+
+Vagrant.configure("2") do |config|
+    config.vm.provision "shell", inline: "DEBIAN_FRONTEND=noninteractive apt-get -y install postgresql-12 postgresql-12-partman"
+end
+
