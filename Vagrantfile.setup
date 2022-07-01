@@ -37,19 +37,19 @@ deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_re
 deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs)-security universe
 deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs)-security multiverse
 EOF
-            apt -y update
+            apt-get -y update
 
             # Set up PGDG apt repo
-            apt -y install curl ca-certificates gnupg
+            apt-get -y install curl ca-certificates gnupg
             curl -s #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/ACCC4CF8.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/apt.postgresql.org.gpg >/dev/null
             echo "deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
         else
             # Set up PGDG apt repo
-            apt -y install curl ca-certificates gnupg
+            apt-get -y install curl ca-certificates gnupg
             curl -s https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/apt.postgresql.org.gpg >/dev/null
             echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
         fi
 
-        apt -y update
+        apt-get -y update
     SHELL
 end
