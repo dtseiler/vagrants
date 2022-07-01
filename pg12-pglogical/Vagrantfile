@@ -1,23 +1,33 @@
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
 
-password_cipher = %x(openssl rand -hex 12 | tr -d '\n')
+#
+# Simulate using logical replication to migrate a database (or cluster of databases)
+# from Ubuntu 18.04 (bionic) to 22.04 (jammy) and the new glibc changes that force us
+# to take this path (or pg_dump/restore everything which means much more downtime).
+#
+# * Both old and new are PG 12 but we can play with PG 14 on the target side.
+# * Source DB does NOT have data checksums enabled, but target will.
+# * Target DB should be sure to have HugePages properly sized and enabled (huge_pages=on).
+#
 
 # Load setup Vagrantfile
 load "../Vagrantfile.setup"
 
+password_cipher = %x(openssl rand -hex 12 | tr -d '\n')
+
 servers = [
   {
-    :name => "source-vm",
+    :name => "pg101",
     :ipaddr => "192.168.60.101",
     :box => "bento/ubuntu-18.04",
     :pg_version => 12
   },
   {
-    :name => "target-vm",
+    :name => "pg102",
     :ipaddr => "192.168.60.102",
-    :box => "bento/ubuntu-20.04",
-    :pg_version => 14
+    :box => "bento/ubuntu-22.04",
+    :pg_version => 12
   }
 ]
 
@@ -37,13 +47,16 @@ Vagrant.configure("2") do |config|
 
       srv.vm.provision "shell", inline: <<-SHELL
         apt-get -y install postgresql-common
-        if [ $(hostname) = 'target-vm' ]
+        if [ $(hostname) = 'pg102' ]
         then
           # Enable data checksums on the replica (but not primary)
           echo "initdb_options = '--data-checksums'" >> /etc/postgresql-common/createcluster.conf
         fi
 
-        apt-get -y install postgresql-#{server[:pg_version]} postgresql-#{server[:pg_version]}-pglogical
+        apt-get -y install postgresql-#{server[:pg_version]} \
+          postgresql-#{server[:pg_version]}-partman \
+          postgresql-#{server[:pg_version]}-pglogical \
+          postgresql-#{server[:pg_version]}-pgl-ddl-deploy
 
         echo "shared_preload_libraries = 'pglogical'" >> /etc/postgresql/#{server[:pg_version]}/main/postgresql.conf
         echo "listen_addresses = '*'" >> /etc/postgresql/#{server[:pg_version]}/main/postgresql.conf
@@ -63,13 +76,19 @@ Vagrant.configure("2") do |config|
 
         systemctl restart postgresql@#{server[:pg_version]}-main
 
-        if [ $(hostname) = 'source-vm' ]
+        if [ $(hostname) = 'pg101' ]
         then
           su -l postgres -c "pg_ctlcluster reload #{server[:pg_version]} main"
+
+          # Create testdb and load with data
           su -l postgres -c "createdb testdb"
           su -l postgres -c "psql -d testdb -a -f /vagrant/gen_data.sql"
+
+          # Dump schema
           su -l postgres -c "pg_dump -d testdb -s -f /tmp/testdb_schema.sql"
           mv /tmp/testdb_schema.sql /vagrant/testdb_schema.sql
+
+          # Create pglogical extension
           su -l postgres -c "psql -d testdb -c \\"CREATE EXTENSION pglogical;\\""
 
 
@@ -82,12 +101,18 @@ Vagrant.configure("2") do |config|
           #su -l postgres -c "psql -d testdb -c \\"GRANT SELECT ON ALL SEQUENCES IN SCHEMA pglogical TO replicator;\\""
 
           # pglogical docs have this procedure but GCP does not?
+          # Configure pglogical nodes and create replication set
           su -l postgres -c "psql -d testdb -c \\"SELECT pglogical.create_node(node_name := 'provider1', dsn := 'host=192.168.60.101 port=5432 dbname=testdb user=replicator');\\""
           su -l postgres -c "psql -d testdb -c \\"SELECT pglogical.replication_set_add_all_tables('default', ARRAY['public']);\\""
         else
+          # Create empty testdb and load schema-only dump
           su -l postgres -c "createdb testdb"
           su -l postgres -c "psql -d testdb -a -f /vagrant/testdb_schema.sql"
+
+          # Create pglogical extension
           su -l postgres -c "psql -d testdb -c \\"CREATE EXTENSION pglogical;\\""
+
+          # Configure pglogical nodes and create subscription
           su -l postgres -c "psql -d testdb -c \\"SELECT pglogical.create_node(node_name := 'subscriber1', dsn := 'host=192.168.60.102 port=5432 dbname=testdb user=replicator');\\""
           su -l postgres -c "psql -d testdb -c \\"SELECT pglogical.create_subscription(subscription_name := 'subscription1', provider_dsn := 'host=192.168.60.101 port=5432 dbname=testdb user=replicator');\\""
         fi
