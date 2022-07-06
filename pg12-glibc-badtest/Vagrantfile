@@ -1,0 +1,96 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# Sets up physical streaming replication between Ubuntu 18.04 and Ubuntu 22.04,
+# which would be using the new glibc >- 2.28.
+
+# Load setup Vagrantfile
+load "../Vagrantfile.setup"
+
+password_cipher = %x(openssl rand -hex 12 | tr -d '\n')
+
+servers = [
+    {
+        :name => "pg111",
+        :ipaddr => "192.168.60.111",
+        :box => "bento/ubuntu-18.04",
+        :pg_version => 12
+    },
+    {
+        :name => "pg112",
+        :ipaddr => "192.168.60.112",
+        :box => "bento/ubuntu-22.04",
+        :pg_version => 12
+    }
+]
+
+Vagrant.configure("2") do |config|
+    servers.each do |server|
+        config.vm.define server[:name] do |srv|
+
+     		srv.vm.box = server[:box]
+            srv.vm.network :private_network, ip: server[:ipaddr]
+            srv.vm.hostname = server[:name]
+
+            srv.vm.provision "shell", inline: <<-SHELL
+
+				apt-get -y install postgresql-#{server[:pg_version]} \
+				  postgresql-#{server[:pg_version]}-partman \
+
+                mkdir /archives
+                chown postgres:postgres /archives
+
+                #
+                # SSH Key Authentication (for pg_upgrade w/ rsync testing)
+                #
+                if [ -d /vagrant/keys -a -f /vagrant/keys/test_rsa ]
+                then
+                    su -l postgres -c "mkdir -p ~/.ssh; chmod 700 ~/.ssh"
+                    su -l postgres -c "cp /vagrant/keys/test_rsa ~/.ssh/id_rsa; chmod 600 ~/.ssh/id_rsa"
+                    su -l postgres -c "cp /vagrant/keys/test_rsa.pub ~/.ssh/id_rsa.pub; chmod 600 ~/.ssh/id_rsa.pub"
+                    su -l postgres -c "cp /vagrant/keys/test_rsa.pub ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys"
+                fi
+                echo "    StrictHostKeyChecking no" >> /etc/ssh/ssh_config
+
+                echo "listen_addresses = '*'" >> /etc/postgresql/#{server[:pg_version]}/main/postgresql.conf
+                echo "max_wal_senders = 10" >> /etc/postgresql/#{server[:pg_version]}/main/postgresql.conf
+                echo "max_replication_slots = 10" >> /etc/postgresql/#{server[:pg_version]}/main/postgresql.conf
+                echo "wal_level = replica" >> /etc/postgresql/#{server[:pg_version]}/main/postgresql.conf
+                echo "hot_standby = on" >> /etc/postgresql/#{server[:pg_version]}/main/postgresql.conf
+                echo "archive_mode = on" >> /etc/postgresql/#{server[:pg_version]}/main/postgresql.conf
+                echo "archive_command = 'cp %p /archives/%f'" >> /etc/postgresql/#{server[:pg_version]}/main/postgresql.conf
+                echo "restore_command = 'cp /archives/%f %p'" >> /etc/postgresql/#{server[:pg_version]}/main/postgresql.conf
+                echo "max_replication_slots = 10" >> /etc/postgresql/#{server[:pg_version]}/main/postgresql.conf
+                echo "host         replication            replicator      192.168.60.0/24      md5" >> /etc/postgresql/#{server[:pg_version]}/main/pg_hba.conf
+
+                su -l postgres -c "echo 'export PATH=/usr/lib/postgresql/#{server[:pg_version]}/bin:\$PATH' >> /var/lib/postgresql/.pgsql_profile"
+                su -l postgres -c "echo '*:*:*:replicator:#{password_cipher}' >> /var/lib/postgresql/.pgpass"
+                su -l postgres -c "echo '*:*:*:postgres:#{password_cipher}' >> /var/lib/postgresql/.pgpass"
+                su -l postgres -c "chmod 0600 /var/lib/postgresql/.pgpass"
+
+                if [ $(hostname) = 'pg111' ]
+                then
+                    su -l postgres -c "psql -c \\"create user replicator replication password '#{password_cipher}'\\""
+                    systemctl restart postgresql@#{server[:pg_version]}-main
+
+					# Create testdb and load with data
+					su -l postgres -c "createdb testdb"
+					su -l postgres -c "psql -d testdb -a -f /vagrant/gen_data.sql"
+
+                    su -l postgres -c "psql -c \\"select pg_create_physical_replication_slot('replica');\\""
+                else
+                    systemctl stop postgresql@#{server[:pg_version]}-main
+                    echo "primary_conninfo = 'user=replicator host=192.168.60.111 port=5432'" >> /etc/postgresql/#{server[:pg_version]}/main/postgresql.conf
+                    echo "primary_slot_name = 'replica'" >> /etc/postgresql/#{server[:pg_version]}/main/postgresql.conf
+                    rm -rf /var/lib/postgresql/#{server[:pg_version]}/main
+                    su -l postgres -c "mkdir /var/lib/postgresql/#{server[:pg_version]}/main && chmod 700 /var/lib/postgresql/#{server[:pg_version]}/main"
+
+                    su -l postgres -c "pg_basebackup -h 192.168.60.111 -U replicator -p 5432 -D /var/lib/postgresql/#{server[:pg_version]}/main -Fp -Xs -P -R"
+                    su -l postgres -c "touch /var/lib/postgresql/#{server[:pg_version]}/main/standby.signal"
+
+                    systemctl start postgresql@#{server[:pg_version]}-main
+                fi
+            SHELL
+        end
+    end
+end
