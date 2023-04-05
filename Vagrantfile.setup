@@ -15,6 +15,8 @@ Vagrant.configure("2") do |config|
         export DEBIAN_FRONTEND=noninteractive
 
         # Configure for mirror if we can see it & set up PGDG apt repo
+        apt-get -y update
+        apt-get -y install curl
         if [[ -z "#{ENV['APT_MIRROR']}" ]]; then
           MIRROR_RESPONSE="0"
         else
@@ -22,7 +24,6 @@ Vagrant.configure("2") do |config|
         fi
 
         if [[ "$MIRROR_RESPONSE" = "200" ]]; then
-
             cat > /etc/apt/sources.list <<EOF
 deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs) main restricted
 deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs)-updates main restricted
