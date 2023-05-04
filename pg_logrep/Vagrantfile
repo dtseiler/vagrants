@@ -100,7 +100,6 @@ Vagrant.configure("2") do |config|
           mv /tmp/testdb_schema.sql /vagrant/testdb_schema.sql
 
           # CREATE PUBLICATION HERE
-          #su -l postgres -c "psql -d testdb -c \\"CREATE PUBLICATION testdb_pub FOR ALL TABLES;\\""
           su -l postgres -c "psql -a -d testdb -c \\"CREATE PUBLICATION testdb_pub01 FOR TABLE pgbench_branches, pgbench_history, pgbench_tellers;\\""
           su -l postgres -c "psql -a -d testdb -c \\"CREATE PUBLICATION testdb_pub02 FOR TABLE pgbench_accounts;\\""
 
@@ -116,9 +115,8 @@ Vagrant.configure("2") do |config|
           su -l postgres -c "psql -d testdb -a -f /vagrant/testdb_schema.sql"
 
           # CREATE SUBSCRIPTION HERE
-          #su -l postgres -c "psql -d testdb -c \\"CREATE SUBSCRIPTION testdb_sub CONNECTION 'host=192.168.60.184 port=5432 dbname=testdb user=replicator' PUBLICATION testdb_pub;\\""
           su -l postgres -c "psql -a -d testdb -c \\"CREATE SUBSCRIPTION testdb_sub01 CONNECTION 'host=192.168.60.184 port=5432 dbname=testdb user=replicator' PUBLICATION testdb_pub01;\\""
-          #su -l postgres -c "psql -a -d testdb -c \\"CREATE SUBSCRIPTION testdb_sub02 CONNECTION 'host=192.168.60.184 port=5432 dbname=testdb user=replicator' PUBLICATION testdb_pub02 with (slot_name = 'pgbench_accounts_rep_slot', create_slot='false' , enabled='false', copy_data='false');\\""
+          # su -l postgres -c "psql -a -d testdb -c \\"CREATE SUBSCRIPTION testdb_sub02 CONNECTION 'host=192.168.60.184 port=5432 dbname=testdb user=replicator' PUBLICATION testdb_pub02 with (slot_name = 'testdb_sub02', create_slot='false' , enabled='false', copy_data='false');\\""
         fi
       SHELL
     end
