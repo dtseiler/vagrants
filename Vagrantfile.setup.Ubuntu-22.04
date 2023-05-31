@@ -1,0 +1,61 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+NAME = "ubuntu2204-base"
+
+# Specify minimum Vagrant and Vagrant API version
+Vagrant.require_version ">= 1.8.0"
+VAGRANTFILE_API_VERSION = "2"
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+    config.vm.define NAME
+    config.vm.hostname = NAME
+
+    # Default to bento box
+    config.vm.box = "bento/ubuntu-22.04"
+
+    # Set default virtualbox provider settings
+    config.vm.provider :virtualbox do |vb|
+        vb.memory = "1024"
+        vb.gui = false
+    end
+
+    config.vm.provision "shell", inline: <<-SHELL
+        export DEBIAN_FRONTEND=noninteractive
+
+        # Configure for mirror if we can see it & set up PGDG apt repo
+        apt-get -y update
+        apt-get -y install curl
+        MIRROR_RESPONSE=$(curl -sI #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ | head -n 1 | cut -d$' ' -f2)
+        if [[ "$MIRROR_RESPONSE" = "200" ]]; then
+
+            cat > /etc/apt/sources.list <<EOF
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs) main restricted
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs)-updates main restricted
+
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs) universe
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs)-updates universe
+
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs) multiverse
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs)-updates multiverse
+
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs)-security main restricted
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs)-security universe
+deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/archive.ubuntu.com/ubuntu/ $(lsb_release -cs)-security multiverse
+EOF
+            apt-get -y update
+
+            # Set up PGDG apt repo
+            apt-get -y install curl ca-certificates gnupg
+            curl -s #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/ACCC4CF8.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/apt.postgresql.org.gpg >/dev/null
+            echo "deb [arch=amd64] #{ENV['APT_MIRROR']}/mirror/apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+        else
+            # Set up PGDG apt repo
+            apt-get -y install curl ca-certificates gnupg
+            curl -s https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/apt.postgresql.org.gpg >/dev/null
+            echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+        fi
+
+        apt-get -y update
+    SHELL
+end

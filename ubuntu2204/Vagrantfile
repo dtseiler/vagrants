@@ -2,19 +2,15 @@
 # # vi: set ft=ruby :
 
 # Load setup Vagrantfile
+#vagrant_git_dir = "/Users/donseiler/git/dtseiler/vagrants"
+#ubuntu2204_vagrantfile = vagrant_git_dir + "/Vagrantfile.setup.Ubuntu-22.04"
+#load ubuntu2204_vagrantfile if File.exists?(ubuntu2204_vagrantfile)
 load "../Vagrantfile.setup.Ubuntu-22.04"
-
-# Specify minimum Vagrant and Vagrant API version
-Vagrant.require_version ">= 1.8.0"
-VAGRANTFILE_API_VERSION = "2"
-
-# Figure out what dir the Vagrantfile is really in
-VAGRANT_ROOT = File.dirname(__FILE__)
 
 NAME = "ubuntu2204-base"
 
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
-    config.vm.define NAME
-    config.vm.hostname = NAME
+    #config.vm.define NAME
+    #config.vm.hostname = NAME
     #config.vm.provision "shell", inline: "apt update"
 end
