@@ -2,7 +2,7 @@
 # vi: set ft=ruby :
 
 # Load setup Vagrantfile
-load "../Vagrantfile"
+load "../../Vagrantfile.setup.Ubuntu-22.04"
 
 # define hostname
 NAME = "ubuntu2204-pg12"
